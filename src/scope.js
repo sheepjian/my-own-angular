@@ -3,6 +3,7 @@ var _ = require('lodash');
 
 function Scope() {
 	this.$$watchers = [];
+	this.$$lastDirtyWatch = null;
 }
 
 var initWatchVal = function() {};
@@ -37,23 +38,36 @@ Scope.prototype.$$superDigestOnce = function() {
 	return dirty;
 };
 
-Scope.prototype.dirtyCheck = function(oldValue, newValue) {
-	return oldValue !== newValue;
+Scope.prototype.dirtyCheck = function(oldValue, newValue, valueEq) {
+	if((typeof newValue === 'number' && typeof oldValue === 'number' &&
+isNaN(newValue) && isNaN(oldValue)))
+		return false;
+
+	if(valueEq) {
+		return !_.isEqual(oldValue, newValue);
+	} else {
+		return (oldValue !== newValue);
+	}
 };
 
 Scope.prototype.$$digestOnce = function() {
 	var self = this;
 	var newValue, oldValue, dirty;
-	_.forEach(this.$$watchers, function(watcher) {
+	var currentWatchers;
+
+	_.forEach(self.$$watchers , function(watcher) {
 		newValue = watcher.watchFn(self);
 		oldValue = watcher.last;
-		if(self.dirtyCheck(newValue, oldValue)) {
-			watcher.last = newValue;
+		if(self.dirtyCheck(newValue, oldValue, watcher.valueEq)) {
+			self.$$lastDirtyWatch = watcher;
+			watcher.last = (watcher.valueEq ? _.cloneDeep(newValue) : newValue);
 			if(oldValue === initWatchVal) {
 				oldValue = newValue;
 			}
 			watcher.listenFn(newValue, oldValue, self);
 			dirty = true;
+		} else if(self.$$lastDirtyWatch === watcher) {
+			return false;
 		}
 	});
 	return dirty;
@@ -62,27 +76,40 @@ Scope.prototype.$$digestOnce = function() {
 Scope.prototype.$digest = function(isSuperDigest) {
 	var dirty;
 	var counter = 0;
+	var upperBound = 10;
+	this.$$lastDirtyWatch = null;
 	do {
 		if(isSuperDigest)
 			dirty = this.$$superDigestOnce();
 		else
 			dirty = this.$$digestOnce();
 		counter++;
-	} while (dirty && counter<=10);
+	} while (dirty && counter<=upperBound);
 	if(dirty)
-		throw "10 digest iterations reached";
+		throw upperBound + " digest iterations reached";
 
 	return counter;
 };
 
-Scope.prototype.$watch = function(watchFn, listenFn) {
+Scope.prototype.$watch = function(watchFn, listenFn, valueEq) {
 	var watcher = {
 		watchFn: watchFn,
 		listenFn: listenFn || function() {},
-		last: initWatchVal
+		last: initWatchVal,
+		valueEq: !!valueEq
 	};
 
 	this.$$watchers.push(watcher);
+	this.$$lastDirtyWatch = null;
+};
+
+Scope.prototype.$eval = function(evalFn, args) {
+	return evalFn(this, args);
+};
+
+Scope.prototype.$apply = function(applyFn) {
+	this.$eval(applyFn);
+	this.$digest();
 };
 
 module.exports = Scope;

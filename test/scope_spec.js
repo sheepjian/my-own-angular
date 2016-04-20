@@ -1,6 +1,7 @@
 'use strict';
 
 var Scope = require('../src/scope');
+var _ = require('lodash');
 
 describe("Scope--->", function() {
 	it("can be constructed and used as an object", function() {
@@ -176,8 +177,7 @@ describe("Scope--->", function() {
 				function(scope) {
 					return scope.d;
 				},
-				function(newValue, oldValue, scope) {
-				}
+				function(newValue, oldValue, scope) {}
 			);
 			scope.$watch(
 				function(scope) {
@@ -214,8 +214,127 @@ describe("Scope--->", function() {
 			var optimizedDigestRound = scope.$digest(true);
 			//console.log('Digest Rounds after optimization is '+digestRound);
 
-			expect(optimizingDigestRound>=optimizedDigestRound).toBe(true);
+			expect(optimizingDigestRound >= optimizedDigestRound).toBe(true);
 		});
+
+		it("ends the digest when the last watch is clean", function() {
+			scope.array = _.range(100);
+			var watchExecutions = 0;
+			_.times(100, function(i) {
+				scope.$watch(
+					function(scope) {
+						watchExecutions++;
+						return scope.array[i];
+					},
+					function(newValue, oldValue, scope) {}
+				);
+			});
+			scope.$digest();
+			expect(watchExecutions).toBe(200);
+			scope.array[0] = 420;
+			scope.$digest();
+			expect(watchExecutions).toBe(301);
+
+			// the short circuit optimization doest not make too much difference for worst case
+			scope.array[99] = 420;
+			scope.$digest();
+			expect(watchExecutions).toBe(501);
+		});
+
+		it("does not end digest so that new watches are not run", function() {
+			scope.aValue = 'abc';
+			scope.counter = 0;
+			scope.$watch(
+				function(scope) {
+					return scope.aValue;
+				},
+				function(newValue, oldValue, scope) {
+					scope.$watch(
+						function(scope) {
+							return scope.aValue;
+						},
+						function(newValue, oldValue, scope) {
+							scope.counter++;
+						}
+					);
+				}
+			);
+			scope.$digest();
+			expect(scope.counter).toBe(1);
+		});
+
+		it("compares based on value if enabled", function() {
+			scope.aValue = [1, 2, 3];
+			scope.counter = 0;
+
+			scope.$watch(
+				function(scope) {
+					return scope.aValue;
+				},
+				function(newValue, oldValue, scope) {
+					scope.counter++;
+				},
+				true
+			);
+			scope.$digest();
+			expect(scope.counter).toBe(1);
+			scope.aValue.push(4);
+			scope.$digest();
+			expect(scope.counter).toBe(2);
+		});
+
+		it("correctly handles NaNs", function() {
+			scope.number = 0 / 0; // NaN
+			scope.counter = 0;
+			scope.$watch(
+				function(scope) {
+					return scope.number;
+				},
+				function(newValue, oldValue, scope) {
+					scope.counter++;
+				}
+			);
+			scope.$digest();
+			expect(scope.counter).toBe(1);
+			scope.$digest();
+			expect(scope.counter).toBe(1);
+		});
+
+		it("executes $eval'ed function and returns result", function() {
+			scope.aValue = 42;
+			var result = scope.$eval(function(scope) {
+				return scope.aValue;
+			});
+			expect(result).toBe(42);
+		});
+
+		it("passes the second $eval argument straight through", function() {
+			scope.aValue = 42;
+			var result = scope.$eval(function(scope, arg) {
+				return scope.aValue + arg;
+			}, 2);
+			expect(result).toBe(44);
+		});
+
+		it("executes $apply'ed function and starts the digest", function() {
+			scope.aValue = 'someValue';
+			scope.counter = 0;
+			scope.$watch(
+				function(scope) {
+					return scope.aValue;
+				},
+				function(newValue, oldValue, scope) {
+					scope.counter++;
+				}
+			);
+			scope.$digest();
+			expect(scope.counter).toBe(1);
+			scope.$apply(function(scope) {
+				scope.aValue = 'someOtherValue';
+			});
+			expect(scope.counter).toBe(2);
+		});
+
 
 
 	});
