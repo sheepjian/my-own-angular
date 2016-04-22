@@ -5,6 +5,8 @@ function Scope() {
 	this.$$watchers = [];
 	this.$$lastDirtyWatch = null;
 	this.$$asyncQueue = [];
+	this.$$applyAsyncQueue = [];
+	this.$$applyAsyncId = null;
 	this.$$phase = null;
 }
 
@@ -81,6 +83,12 @@ Scope.prototype.$digest = function(isSuperDigest) {
 	var upperBound = 10;
 	this.$$lastDirtyWatch = null;
 	this.$beginPhase('$digest');
+
+	if (this.$$applyAsyncId) {
+		clearTimeout(this.$$applyAsyncId);
+		this.$$flushApplyAsync();
+	}
+
 	do {
 		while (this.$$asyncQueue.length) {
 			var asyncTask = this.$$asyncQueue.shift();
@@ -116,7 +124,8 @@ Scope.prototype.$eval = function(evalFn, args) {
 
 Scope.prototype.$evalAsync = function(evalFn) {
 	var self = this;
-	if(!self.$$phase && !self.$$asyncQueue.length) {
+	// one time flush in the same digest
+	if (!self.$$phase && !self.$$asyncQueue.length) {
 		setTimeout(function() {
 			self.$digest();
 		}, 0);
@@ -125,6 +134,7 @@ Scope.prototype.$evalAsync = function(evalFn) {
 };
 
 Scope.prototype.$apply = function(applyFn) {
+	// don't try to use apply in the mid of the digest phase
 	try {
 		this.$beginPhase('$apply');
 		this.$eval(applyFn);
@@ -134,7 +144,30 @@ Scope.prototype.$apply = function(applyFn) {
 	}
 };
 
+Scope.prototype.$applyAsync = function(applyFn) {
+	var self = this;
+	self.$$applyAsyncQueue.push(function() {
+		self.$eval(applyFn);
+	});
+	// one time flush for the whole queue after the digest queue
+	// avoid the apply conflicts with digest
+	if (self.$$applyAsyncId === null) {
+		self.$$applyAsyncId = setTimeout(function() {
+			self.$apply(_.bind(self.$$flushApplyAsync, self));
+		}, 0);
+	}
+};
+
+Scope.prototype.$$flushApplyAsync = function() {
+	while (this.$$applyAsyncQueue.length) {
+		this.$$applyAsyncQueue.shift()();
+	}
+	this.$$applyAsyncId = null;
+};
+
+
 Scope.prototype.$beginPhase = function(phase) {
+	// this is how the digest conflict happens
 	if (this.$$phase) {
 		throw this.$$phase + ' already in progress.';
 	}
