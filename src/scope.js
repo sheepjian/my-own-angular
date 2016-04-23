@@ -7,6 +7,7 @@ function Scope() {
 	this.$$asyncQueue = [];
 	this.$$applyAsyncQueue = [];
 	this.$$applyAsyncId = null;
+	this.$$postDigestQueue = [];
 	this.$$phase = null;
 }
 
@@ -102,6 +103,10 @@ Scope.prototype.$digest = function(isSuperDigest) {
 	} while ((dirty || this.$$asyncQueue.length) && counter <= upperBound);
 	if (dirty || this.$$asyncQueue.length)
 		throw upperBound + " digest iterations reached";
+
+	while (this.$$postDigestQueue.length) {
+		this.$$postDigestQueue.shift()();
+	}
 	this.$clearPhase();
 	return counter;
 };
@@ -176,6 +181,10 @@ Scope.prototype.$beginPhase = function(phase) {
 
 Scope.prototype.$clearPhase = function() {
 	this.$$phase = null;
+};
+
+Scope.prototype.$$postDigest = function(cb) {
+	this.$$postDigestQueue.push(cb);
 };
 
 
