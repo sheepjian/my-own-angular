@@ -19,15 +19,19 @@ Scope.prototype.$$superDigestOnce = function() {
 	var cleanWatcher = [];
 	var dirtyWatcher = [];
 	_.forEach(this.$$watchers, function(watcher) {
-		newValue = watcher.watchFn(self);
-		oldValue = watcher.last;
-		if (self.dirtyCheck(newValue, oldValue)) {
-			watcher.last = newValue;
-			if (oldValue === initWatchVal) {
-				oldValue = newValue;
+		try {
+			newValue = watcher.watchFn(self);
+			oldValue = watcher.last;
+			if (self.dirtyCheck(newValue, oldValue, watcher.valueEq)) {
+				watcher.last = (watcher.valueEq ? _.cloneDeep(newValue) : newValue);
+				if (oldValue === initWatchVal) {
+					oldValue = newValue;
+				}
+				watcher.listenFn(newValue, oldValue, self);
+				dirty = true;
 			}
-			watcher.listenFn(newValue, oldValue, self);
-			dirty = true;
+		} catch (e) {
+
 		}
 	});
 	_.forEach(this.$$watchers, function(watcher) {
@@ -60,19 +64,24 @@ Scope.prototype.$$digestOnce = function() {
 	var newValue, oldValue, dirty;
 	var currentWatchers;
 
-	_.forEach(self.$$watchers, function(watcher) {
-		newValue = watcher.watchFn(self);
-		oldValue = watcher.last;
-		if (self.dirtyCheck(newValue, oldValue, watcher.valueEq)) {
-			self.$$lastDirtyWatch = watcher;
-			watcher.last = (watcher.valueEq ? _.cloneDeep(newValue) : newValue);
-			if (oldValue === initWatchVal) {
-				oldValue = newValue;
+	_.forEachRight(self.$$watchers, function(watcher) {
+		try {
+			newValue = watcher.watchFn(self);
+			oldValue = watcher.last;
+			if (self.dirtyCheck(newValue, oldValue, watcher.valueEq)) {
+				self.$$lastDirtyWatch = watcher;
+				watcher.last = (watcher.valueEq ? _.cloneDeep(newValue) : newValue);
+				if (oldValue === initWatchVal) {
+					oldValue = newValue;
+				}
+				watcher.listenFn(newValue, oldValue, self);
+				dirty = true;
+			} else if (self.$$lastDirtyWatch === watcher) {
+				return false;
 			}
-			watcher.listenFn(newValue, oldValue, self);
-			dirty = true;
-		} else if (self.$$lastDirtyWatch === watcher) {
-			return false;
+		} catch (e) {
+			// leave it alone, will delegate the task to $exceptionService
+			//console.error(e);
 		}
 	});
 	return dirty;
@@ -105,7 +114,7 @@ Scope.prototype.$digest = function(isSuperDigest) {
 		throw upperBound + " digest iterations reached";
 
 	while (this.$$postDigestQueue.length) {
-		this.$$postDigestQueue.shift()();
+		this.$eval(this.$$postDigestQueue.shift());
 	}
 	this.$clearPhase();
 	return counter;
@@ -119,12 +128,25 @@ Scope.prototype.$watch = function(watchFn, listenFn, valueEq) {
 		valueEq: !!valueEq
 	};
 
-	this.$$watchers.push(watcher);
+	this.$$watchers.unshift(watcher);
 	this.$$lastDirtyWatch = null;
+	var self = this;
+
+	return function() {
+		var index = self.$$watchers.indexOf(watcher);
+		if (index >= 0) {
+			self.$$watchers.splice(index, 1);
+		}
+	};
 };
 
 Scope.prototype.$eval = function(evalFn, args) {
-	return evalFn(this, args);
+	try {
+		return evalFn(this, args);
+	} catch (e) {
+		// leave it alone, will delegate the task to $exceptionService
+		//console.error(e);
+	}
 };
 
 Scope.prototype.$evalAsync = function(evalFn) {
@@ -139,7 +161,7 @@ Scope.prototype.$evalAsync = function(evalFn) {
 };
 
 Scope.prototype.$apply = function(applyFn) {
-	// don't try to use apply in the mid of the digest phase
+	// don't use apply in the mid of the digest phase
 	try {
 		this.$beginPhase('$apply');
 		this.$eval(applyFn);
@@ -165,11 +187,10 @@ Scope.prototype.$applyAsync = function(applyFn) {
 
 Scope.prototype.$$flushApplyAsync = function() {
 	while (this.$$applyAsyncQueue.length) {
-		this.$$applyAsyncQueue.shift()();
+		this.$eval(this.$$applyAsyncQueue.shift());
 	}
 	this.$$applyAsyncId = null;
 };
-
 
 Scope.prototype.$beginPhase = function(phase) {
 	// this is how the digest conflict happens
@@ -187,5 +208,14 @@ Scope.prototype.$$postDigest = function(cb) {
 	this.$$postDigestQueue.push(cb);
 };
 
+Scope.prototype.$watchGroup = function(watchFnArray, listenFn) {
+	var self = this;
+	var watchFns = function(scope) {
+		return _.map(watchFnArray, function(watchFn) {
+			return watchFn(scope);
+		});
+	};
+	self.$watch(watchFns, listenFn, true);
+};
 
 module.exports = Scope;
