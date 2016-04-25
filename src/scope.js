@@ -208,6 +208,9 @@ Scope.prototype.$$postDigest = function(cb) {
 	this.$$postDigestQueue.push(cb);
 };
 
+// compare my implemetation with solution of the book
+// less code, more power
+// think is more improtant than code
 Scope.prototype.$watchGroup = function(watchFnArray, listenFn) {
 	var self = this;
 	var watchFns = function(scope) {
@@ -215,7 +218,7 @@ Scope.prototype.$watchGroup = function(watchFnArray, listenFn) {
 			return watchFn(scope);
 		});
 	};
-	self.$watch(watchFns, listenFn, true);
+	return self.$watch(watchFns, listenFn, true);
 };
 
 module.exports = Scope;
