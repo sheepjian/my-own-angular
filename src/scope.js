@@ -9,6 +9,7 @@ function Scope() {
 	this.$$applyAsyncId = null;
 	this.$$postDigestQueue = [];
 	this.$$phase = null;
+	this.$$children = [];
 }
 
 var initWatchVal = function() {};
@@ -116,6 +117,9 @@ Scope.prototype.$digest = function(isSuperDigest) {
 	while (this.$$postDigestQueue.length) {
 		this.$eval(this.$$postDigestQueue.shift());
 	}
+	_.forEach(this.$$children, function(childScope) {
+		childScope.$digest();
+	});
 	this.$clearPhase();
 	return counter;
 };
@@ -219,6 +223,22 @@ Scope.prototype.$watchGroup = function(watchFnArray, listenFn) {
 		});
 	};
 	return self.$watch(watchFns, listenFn, true);
+};
+
+
+/*
+*
+*  Scope Inheritance
+*
+*/
+Scope.prototype.$new = function() {
+	// this shows how Object.create() is implemented
+	var ChildScopeConstrucor = function() {};
+	ChildScopeConstrucor.prototype = this;
+	var child = new ChildScopeConstrucor();
+	Scope.call(child);
+	this.$$children.push(child);
+	return child;
 };
 
 module.exports = Scope;
