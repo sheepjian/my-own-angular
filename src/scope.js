@@ -10,6 +10,7 @@ function Scope() {
 	this.$$postDigestQueue = [];
 	this.$$phase = null;
 	this.$$children = [];
+	this.$$root = this;
 }
 
 var initWatchVal = function() {};
@@ -70,14 +71,14 @@ Scope.prototype.$$digestOnce = function() {
 			newValue = watcher.watchFn(self);
 			oldValue = watcher.last;
 			if (self.dirtyCheck(newValue, oldValue, watcher.valueEq)) {
-				self.$$lastDirtyWatch = watcher;
+				self.$$root.$$lastDirtyWatch = watcher;
 				watcher.last = (watcher.valueEq ? _.cloneDeep(newValue) : newValue);
 				if (oldValue === initWatchVal) {
 					oldValue = newValue;
 				}
 				watcher.listenFn(newValue, oldValue, self);
 				dirty = true;
-			} else if (self.$$lastDirtyWatch === watcher) {
+			} else if (self.$$root.$$lastDirtyWatch === watcher) {
 				return false;
 			}
 		} catch (e) {
@@ -92,7 +93,7 @@ Scope.prototype.$digest = function(isSuperDigest) {
 	var dirty;
 	var counter = 0;
 	var upperBound = 10;
-	this.$$lastDirtyWatch = null;
+	this.$$root.$$lastDirtyWatch = null;
 	this.$beginPhase('$digest');
 
 	if (this.$$applyAsyncId) {
@@ -133,7 +134,7 @@ Scope.prototype.$watch = function(watchFn, listenFn, valueEq) {
 	};
 
 	this.$$watchers.unshift(watcher);
-	this.$$lastDirtyWatch = null;
+	this.$$root.$$lastDirtyWatch = null;
 	var self = this;
 
 	return function() {
@@ -158,7 +159,7 @@ Scope.prototype.$evalAsync = function(evalFn) {
 	// one time flush in the same digest
 	if (!self.$$phase && !self.$$asyncQueue.length) {
 		setTimeout(function() {
-			self.$digest();
+			self.$$root.$digest();
 		}, 0);
 	}
 	this.$$asyncQueue.push(evalFn);
@@ -171,7 +172,7 @@ Scope.prototype.$apply = function(applyFn) {
 		this.$eval(applyFn);
 	} finally {
 		this.$clearPhase();
-		this.$digest();
+		this.$$root.$digest();
 	}
 };
 
@@ -227,16 +228,22 @@ Scope.prototype.$watchGroup = function(watchFnArray, listenFn) {
 
 
 /*
-*
-*  Scope Inheritance
-*
-*/
-Scope.prototype.$new = function() {
+ *
+ *  Scope Inheritance
+ *
+ */
+Scope.prototype.$new = function(isolated) {
 	// this shows how Object.create() is implemented
 	var ChildScopeConstrucor = function() {};
 	ChildScopeConstrucor.prototype = this;
-	var child = new ChildScopeConstrucor();
-	Scope.call(child);
+	var child;
+	if (!isolated) {
+		child = new ChildScopeConstrucor();
+		Scope.call(child);
+		child.$$root = this.$$root;
+	} else {
+		child = new Scope();
+	}
 	this.$$children.push(child);
 	return child;
 };
