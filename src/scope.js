@@ -10,6 +10,7 @@ function Scope() {
 	this.$$postDigestQueue = [];
 	this.$$phase = null;
 	this.$$children = [];
+	this.$$parent = null;
 	this.$$root = this;
 }
 
@@ -232,20 +233,34 @@ Scope.prototype.$watchGroup = function(watchFnArray, listenFn) {
  *  Scope Inheritance
  *
  */
-Scope.prototype.$new = function(isolated) {
-	// this shows how Object.create() is implemented
-	var ChildScopeConstrucor = function() {};
-	ChildScopeConstrucor.prototype = this;
+Scope.prototype.$new = function(isolated, anotherParent) {
 	var child;
 	if (!isolated) {
+		// this shows how Object.create() is implemented
+		var ChildScopeConstrucor = function() {};
+		ChildScopeConstrucor.prototype = this;
 		child = new ChildScopeConstrucor();
 		Scope.call(child);
-		child.$$root = this.$$root;
 	} else {
 		child = new Scope();
 	}
-	this.$$children.push(child);
+
+	anotherParent = anotherParent || this;
+	child.$$parent = anotherParent;
+	child.$$root = anotherParent.$$root;
+	anotherParent.$$children.push(child);
+
 	return child;
+};
+
+Scope.prototype.$destroy = function() {
+	if (this.$$parent) {
+		var index = this.$$parent.$$children.indexOf(this);
+		if (index >= 0) {
+			this.$$parent.$$children.splice(index, 1);
+		}
+	}
+	this.$$watchers = null;
 };
 
 module.exports = Scope;
