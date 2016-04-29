@@ -263,4 +263,74 @@ Scope.prototype.$destroy = function() {
 	this.$$watchers = null;
 };
 
+function isArrayLike(obj) {
+	if (_.isNull(obj) || _.isUndefined(obj)) {
+		return false;
+	}
+	var length = obj.length;
+	return _.isNumber(length);
+}
+
+
+Scope.prototype.$watchCollection = function(watchFn, listenerFn) {
+	var newValue, oldValue;
+	var self = this;
+	var changeCount = 0;
+	var arrayLength = 0;
+
+	var internalWatchFn = function(scope) {
+		newValue = watchFn(scope);
+		if (_.isObject(newValue)) {
+			if (isArrayLike(newValue)) {
+				if (!_.isArray(oldValue)) {
+					oldValue = [];
+				}
+				if (oldValue.length != newValue.length) {
+					oldValue.length = newValue.length;
+				}
+				_.forEach(newValue, function(newItem, i) {
+					var bothNaN = _.isNaN(newItem) && _.isNaN(oldValue[i]);
+					if (!bothNaN && newItem !== oldValue[i]) {
+						changeCount++;
+						oldValue[i] = newItem;
+					}
+				});
+			} else {
+				if (!_.isObject(oldValue) || isArrayLike(oldValue)) {
+					changeCount++;
+					oldValue = {};
+				}
+				_.forOwn(newValue, function(newVal, key) {
+					var bothNaN = _.isNaN(newVal) && _.isNaN(oldValue[key]);
+					if (!bothNaN && oldValue[key] !== newVal) {
+						changeCount++;
+						oldValue[key] = newVal;
+					}
+				});
+				_.forOwn(oldValue, function(oldVal, key) {
+					if (!newValue.hasOwnProperty(key)) {
+						changeCount++;
+						//watch out for `delete oldValue.key`, it is different because of prototype chain
+						delete oldValue[key];
+					}
+				});
+			}
+		} else {
+			if (newValue !== oldValue && !isNaN(newValue)) {
+				changeCount++;
+			}
+			oldValue = newValue;
+		}
+
+		return changeCount;
+	};
+	var internalListenerFn = function() {
+		listenerFn(newValue, oldValue, self);
+	};
+
+	return this.$watch(internalWatchFn, internalListenerFn);
+};
+
+
+
 module.exports = Scope;
