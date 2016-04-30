@@ -9,6 +9,7 @@ module.exports = function(config) {
       'test/**/*.js': ['jshint', 'browserify'],
       'src/**/*.js': ['jshint', 'browserify']
     },
+    reporters: ['dots'],
     browsers: ['PhantomJS'],
     browserify: {
       debug: true,
