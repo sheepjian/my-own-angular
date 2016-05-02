@@ -255,6 +255,8 @@ Scope.prototype.$new = function(isolated, anotherParent) {
 };
 
 Scope.prototype.$destroy = function() {
+    this.$broadcast('$destroy');
+    this.$$listeners = {};
     if (this.$$parent) {
         var index = this.$$parent.$$children.indexOf(this);
         if (index >= 0) {
@@ -370,15 +372,30 @@ Scope.prototype.$on = function(event, listener) {
     };
 };
 
+
 Scope.prototype.$emit = function(eventName) {
-    var event = { name: eventName };
+    var propagationStopped = false;
+    var event = {
+        name: eventName,
+        targetScope: this,
+        currentScope: this,
+        stopPropagation: function() {
+            propagationStopped = true;
+        },
+        preventDefault: function() {
+            event.defaultPrevented = true;
+        }
+    };
+
     var listenerArgs = [event].concat(_.tail(arguments));
     this.$$fireEventOnScope(eventName, listenerArgs);
     var scope = this.$$parent;
-    while (scope) {
+    while (scope && !propagationStopped) {
+        event.currentScope = scope;
         scope.$$fireEventOnScope(eventName, listenerArgs);
         scope = scope.$$parent;
     }
+    event.currentScope = null;
     return event;
 };
 
@@ -394,13 +411,21 @@ Scope.prototype.$$everyScope = function(fn) {
 
 
 Scope.prototype.$broadcast = function(eventName) {
-    var event = { name: eventName };
+    var event = {
+        name: eventName,
+        targetScope: this,
+        preventDefault: function() {
+            event.defaultPrevented = true;
+        }
+    };
     var tailArguments = _.tail(arguments);
     var listenerArgs = [event].concat(tailArguments);
     this.$$everyScope(function(scope) {
+        event.currentScope = scope;
         scope.$$fireEventOnScope(eventName, listenerArgs);
         return true;
     });
+    event.currentScope = null;
     return event;
 };
 
@@ -412,7 +437,9 @@ Scope.prototype.$$fireEventOnScope = function(eventName, listenerArgs) {
             if (listeners[i] === null) {
                 listeners.splice(i, 1);
             } else {
-                listeners[i].apply(null, listenerArgs);
+                try {
+                    listeners[i].apply(null, listenerArgs);
+                } catch (e) {}
                 i++;
             }
         }
