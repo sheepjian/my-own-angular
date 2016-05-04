@@ -23,48 +23,74 @@ var REGEXP = [{
     token: TOKEN.UNKNOWN
 }];
 
-function Lexer() {}
+function Lexer() {
+    this.text = '';
+    this.index = 0;
+    this.ch = undefined;
+    this.tokens = [];
+}
 
 Lexer.prototype.lex = function(text) {
     // Tokenization will be done here
-    var tokens = [];
-    var textArray = text.match(/\S+/g);
-    _.forEach(textArray, function(t) {
-        for (var i = 0; i < REGEXP.length; i++) {
-            var reg = REGEXP[i];
-            if (reg.pattern.test(t)) {
-                tokens.push(reg.token);
-                break;
-            }
+    this.text = text;
+    while (this.index < this.text.length) {
+        this.ch = this.text.charAt(this.index);
+        if (this.isNumber(this.ch) || (this.ch === '.' && this.isNumber(this.peek()))) {
+            this.readNumber();
+        } else {
+            throw "Unexpected next character: " + this.ch;
         }
+    }
+    return this.tokens;
+};
+
+Lexer.prototype.peek = function() {
+    return this.index < this.text.length - 1 ?
+        this.text.charAt(this.index + 1) :
+        false;
+};
+
+Lexer.prototype.isNumber = function(ch) {
+    return '0' <= ch && ch <= '9';
+};
+
+Lexer.prototype.readNumber = function() {
+    var number = '';
+    while (this.index < this.text.length) {
+        var ch = this.text.charAt(this.index);
+        if (ch === '.' || this.isNumber(ch)) {
+            number += ch;
+        } else {
+            break;
+        }
+        this.index++;
+    }
+    this.tokens.push({
+        text: number,
+        value: Number(number)
     });
-    return tokens;
 };
 
 function AST(lexer) {
     this.lexer = lexer;
 }
 
+AST.Program = "Program";
+AST.Literal = "Literal";
+
+AST.prototype.program = function() {
+    return { type: AST.Program, body: this.constant() };
+};
+
+AST.prototype.constant = function() {
+    return { type: AST.Literal, value: this.tokens[0].value };
+};
 
 // build the tree node: {value:'', type:''}
 AST.prototype.ast = function(text) {
     this.tokens = this.lexer.lex(text);
     // AST building will be done here
-    if (this.tokens.length == 1) {
-        if (this.tokens[0] === TOKEN.INTEGER) {
-            return function() {
-                return parseInt(text);
-            };
-        } else if (this.tokens[0] === TOKEN.FLOAT) {
-            return function() {
-                return parseFloat(text);
-            };
-        }
-    }
-
-    return function() {
-        return null;
-    };
+    return this.program();
 };
 
 function ASTCompiler(astBuilder) {
@@ -74,7 +100,22 @@ function ASTCompiler(astBuilder) {
 ASTCompiler.prototype.compile = function(text) {
     var ast = this.astBuilder.ast(text);
     // AST compilation will be done here
-    return ast;
+    this.state = { body: [] };
+    this.recurse(ast);
+    /* jshint -W054 */
+    return new Function(this.state.body.join(''));
+    /* jshint +W054 */
+};
+
+ASTCompiler.prototype.recurse = function(ast) {
+    switch (ast.type) {
+        case AST.Program:
+            this.state.body.push('return  ',
+                this.recurse(ast.body), ';');
+            break;
+        case AST.Literal:
+            return ast.value;
+    }
 };
 
 function Parser(lexer) {
