@@ -126,21 +126,32 @@ Lexer.prototype.readIdentifier = function() {
   var substr = this.text.substring(this.index);
   id = re.exec(substr)[0];
   this.index += id.length;
-  this.tokens.push({
-    text: id,
-    value: this.evalIdentifier(id)
-  });
+  var result = this.evalIdentifier(id);
+  result.text = id;
+  this.tokens.push(result);
 };
 
 Lexer.prototype.evalIdentifier = function(text) {
   if (text === 'true') {
-    return true;
+    return {
+      value: true,
+      isIdentifer: false
+    };
   } else if (text === 'false') {
-    return false;
+    return {
+      value: false,
+      isIdentifer: false
+    };
   } else if (text === 'null') {
-    return null;
+    return {
+      value: null,
+      isIdentifer: false
+    };
   } else {
-    return text;
+    return {
+      value: text,
+      isIdentifer: true
+    };
   }
 };
 
@@ -152,6 +163,8 @@ AST.Program = "Program";
 AST.Literal = "Literal";
 AST.ArrayExpression = "ArrayExpression";
 AST.ObjectExpression = "ObjectExpression";
+AST.Property = "Property";
+AST.Identifier = "Identifier";
 
 
 // build the tree node: {value:'', type:''}
@@ -168,7 +181,8 @@ AST.prototype.program = function() {
 AST.prototype.parse = function() {
   if (this.detect('[')) {
     return this.arrayDeclaration();
-  } if(this.detect('{')) {
+  }
+  if (this.detect('{')) {
     return this.objectDeclaration();
   } else {
     return this.constant();
@@ -176,7 +190,11 @@ AST.prototype.parse = function() {
 };
 
 AST.prototype.constant = function() {
-  return { type: AST.Literal, value: this.consume().value };
+  if (this.peek().isIdentifer) {
+    return this.identifier();
+  } else {
+    return { type: AST.Literal, value: this.consume().value };
+  }
 };
 
 AST.prototype.detect = function(e) {
@@ -218,6 +236,13 @@ AST.prototype.peek = function(e) {
   }
 };
 
+AST.prototype.identifier = function() {
+  return {
+    type: AST.Identifier,
+    name: this.consume().text
+  };
+};
+
 AST.prototype.objectDeclaration = function() {
   var properties = [];
   if (!this.peek('}')) {
@@ -225,7 +250,7 @@ AST.prototype.objectDeclaration = function() {
       if (this.peek('}')) {
         break;
       }
-      var property = {};
+      var property = { type: AST.Property };
       property.key = this.constant();
       this.consume(':');
       property.value = this.parse();
@@ -240,13 +265,18 @@ function ASTCompiler(astBuilder) {
   this.astBuilder = astBuilder;
 }
 
+ASTCompiler.scope = "scope";
+
 ASTCompiler.prototype.compile = function(text) {
   var ast = this.astBuilder.ast(text);
   // AST compilation will be done here
-  this.state = { body: [] };
+  this.state = { body: [], nextId: 0, vars: [] };
   this.recurse(ast);
+  var varDefinitation = this.state.vars.length ?
+    'var ' + this.state.vars.join(',') + ';' : '';
   /* jshint -W054 */
-  return new Function(this.state.body.join(''));
+  return new Function(ASTCompiler.scope, varDefinitation +
+    this.state.body.join(''));
   /* jshint +W054 */
 };
 
@@ -266,15 +296,43 @@ ASTCompiler.prototype.recurse = function(ast) {
       return '[' + elements.join(',') + ']';
     case AST.ObjectExpression:
       var properties = _.map(ast.value, function(property) {
-        var key = that.recurse(property.key);
+        var key = property.key.type === AST.Identifier ? property.key.name : that.escape(property.key.value);
         var value = that.recurse(property.value);
         return key + ':' + value;
       });
       return '{' + properties.join(',') + '}';
+    case AST.Identifier:
+      var intoId = ASTCompiler.scope;
+      if (ast.name !== 'this') {
+        intoId = this.nextId();
+        this.if_(ASTCompiler.scope, this.assign(intoId,
+          this.link(ASTCompiler.scope, ast.name)));
+      }
+      return intoId;
     default:
-      throw "Unknown Token type: "+ast.type;
+      throw "Unknown Token type: " + ast.type;
   }
 };
+
+ASTCompiler.prototype.nextId = function() {
+  var id = 'v' + (this.state.nextId++);
+  this.state.vars.push(id);
+  return id;
+};
+
+ASTCompiler.prototype.link = function(scope, key) {
+  return scope + '.' + key;
+};
+
+ASTCompiler.prototype.assign = function(id, value) {
+  return id + '=' + value + ';';
+};
+
+ASTCompiler.prototype.if_ = function(test, consequent) {
+  this.state.body.push(
+    'if (', test, '){', consequent, '}');
+};
+
 
 ASTCompiler.prototype.stringEscapeRegex = /[^ a-zA-Z0-9]/g;
 
