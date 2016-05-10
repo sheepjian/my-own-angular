@@ -42,7 +42,7 @@ Lexer.prototype.peek = function() {
 };
 
 Lexer.prototype.isOperator = function(ch) {
-  return ch.match(/[\[\],\{\}\:]/);
+  return ch.match(/[\[\],.\{\}\:]/);
 };
 
 Lexer.prototype.isNumber = function(ch) {
@@ -165,6 +165,7 @@ AST.ArrayExpression = "ArrayExpression";
 AST.ObjectExpression = "ObjectExpression";
 AST.Property = "Property";
 AST.Identifier = "Identifier";
+AST.MemberExpression = "MemberExpression";
 
 
 // build the tree node: {value:'', type:''}
@@ -179,14 +180,22 @@ AST.prototype.program = function() {
 };
 
 AST.prototype.parse = function() {
+  var declaration;
   if (this.detect('[')) {
-    return this.arrayDeclaration();
-  }
-  if (this.detect('{')) {
-    return this.objectDeclaration();
+    declaration = this.arrayDeclaration();
+  } else if (this.detect('{')) {
+    declaration = this.objectDeclaration();
   } else {
-    return this.constant();
+    declaration = this.constant();
   }
+  while (this.detect('.')) {
+    declaration = {
+      type: AST.MemberExpression,
+      object: declaration,
+      property: this.identifier()
+    };
+  }
+  return declaration;
 };
 
 AST.prototype.constant = function() {
@@ -266,6 +275,7 @@ function ASTCompiler(astBuilder) {
 }
 
 ASTCompiler.scope = "scope";
+ASTCompiler.local = "local";
 
 ASTCompiler.prototype.compile = function(text) {
   var ast = this.astBuilder.ast(text);
@@ -275,13 +285,14 @@ ASTCompiler.prototype.compile = function(text) {
   var varDefinitation = this.state.vars.length ?
     'var ' + this.state.vars.join(',') + ';' : '';
   /* jshint -W054 */
-  return new Function(ASTCompiler.scope, varDefinitation +
-    this.state.body.join(''));
+  return new Function(ASTCompiler.scope, ASTCompiler.local,
+    varDefinitation + this.state.body.join(''));
   /* jshint +W054 */
 };
 
 ASTCompiler.prototype.recurse = function(ast) {
   var that = this;
+  var intoId;
   switch (ast.type) {
     case AST.Program:
       this.state.body.push('return  ',
@@ -302,12 +313,23 @@ ASTCompiler.prototype.recurse = function(ast) {
       });
       return '{' + properties.join(',') + '}';
     case AST.Identifier:
-      var intoId = ASTCompiler.scope;
+      intoId = ASTCompiler.scope;
       if (ast.name !== 'this') {
         intoId = this.nextId();
-        this.if_(ASTCompiler.scope, this.assign(intoId,
-          this.link(ASTCompiler.scope, ast.name)));
+        var localMember = this.link(ASTCompiler.local, ast.name);
+        var scopeMember = this.link(ASTCompiler.scope, ast.name);
+
+        var condition = ASTCompiler.local + '&&' + localMember;
+        this.ifelseif_(condition, this.assign(intoId,
+          localMember), ASTCompiler.scope, 
+          this.assign(intoId, scopeMember));
       }
+      return intoId;
+    case AST.MemberExpression:
+      intoId = this.nextId();
+      var left = this.recurse(ast.object);
+      this.if_(left, this.assign(intoId,
+        this.link(left, ast.property.name)));
       return intoId;
     default:
       throw "Unknown Token type: " + ast.type;
@@ -331,6 +353,12 @@ ASTCompiler.prototype.assign = function(id, value) {
 ASTCompiler.prototype.if_ = function(test, consequent) {
   this.state.body.push(
     'if (', test, '){', consequent, '}');
+};
+
+ASTCompiler.prototype.ifelseif_ = function(condition1, consequent, condition2, otherwise) {
+  this.state.body.push(
+    'if (', condition1, '){', consequent, '} else if (',
+     condition2,'){', otherwise, '}');
 };
 
 
