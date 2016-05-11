@@ -42,7 +42,7 @@ Lexer.prototype.peek = function() {
 };
 
 Lexer.prototype.isOperator = function(ch) {
-  return ch.match(/[\[\],.\{\}\:]/);
+  return ch.match(/[\[\],.\{\}\:()]/);
 };
 
 Lexer.prototype.isNumber = function(ch) {
@@ -166,6 +166,7 @@ AST.ObjectExpression = "ObjectExpression";
 AST.Property = "Property";
 AST.Identifier = "Identifier";
 AST.MemberExpression = "MemberExpression";
+AST.CallExpression = "CallExpression";
 
 
 // build the tree node: {value:'', type:''}
@@ -188,14 +189,41 @@ AST.prototype.parse = function() {
   } else {
     declaration = this.constant();
   }
-  while (this.detect('.')) {
-    declaration = {
-      type: AST.MemberExpression,
-      object: declaration,
-      property: this.identifier()
-    };
+  var next;
+  while ((next = this.detect('.')) || (next = this.detect('[')) || (next = this.detect('('))) {
+    if (next.text === '(') {
+      declaration = {
+        type: AST.CallExpression,
+        callee: declaration,
+        args: this.parseArguments()
+      };
+      this.consume(')');
+    } else {
+      declaration = {
+        type: AST.MemberExpression,
+        object: declaration,
+        computed: false
+      };
+      if (next.text === '[') {
+        declaration.property = this.parse();
+        declaration.computed = true;
+        this.consume(']');
+      } else {
+        declaration.property = this.identifier();
+      }
+    }
   }
   return declaration;
+};
+
+AST.prototype.parseArguments = function() {
+  var args = [];
+  if (!this.peek(')')) {
+    do {
+      args.push(this.parse());
+    } while (this.detect(','));
+  }
+  return args;
 };
 
 AST.prototype.constant = function() {
@@ -321,16 +349,28 @@ ASTCompiler.prototype.recurse = function(ast) {
 
         var condition = ASTCompiler.local + '&&' + localMember;
         this.ifelseif_(condition, this.assign(intoId,
-          localMember), ASTCompiler.scope, 
+            localMember), ASTCompiler.scope,
           this.assign(intoId, scopeMember));
       }
       return intoId;
     case AST.MemberExpression:
       intoId = this.nextId();
       var left = this.recurse(ast.object);
-      this.if_(left, this.assign(intoId,
-        this.link(left, ast.property.name)));
+      if (ast.computed) {
+        var right = this.recurse(ast.property);
+        this.if_(left, this.assign(intoId,
+          this.index(left, right)));
+      } else {
+        this.if_(left, this.assign(intoId,
+          this.link(left, ast.property.name)));
+      }
       return intoId;
+    case AST.CallExpression:
+      var callee = this.recurse(ast.callee);
+      var args = _.map(ast.args, function(arg) {
+        return that.recurse(arg);
+      });
+      return callee + '&&' + callee + '(' + args.join(',') + ')';
     default:
       throw "Unknown Token type: " + ast.type;
   }
@@ -346,6 +386,11 @@ ASTCompiler.prototype.link = function(scope, key) {
   return scope + '.' + key;
 };
 
+ASTCompiler.prototype.index = function(scope, key) {
+  return scope + '[' + key + ']';
+};
+
+
 ASTCompiler.prototype.assign = function(id, value) {
   return id + '=' + value + ';';
 };
@@ -358,7 +403,7 @@ ASTCompiler.prototype.if_ = function(test, consequent) {
 ASTCompiler.prototype.ifelseif_ = function(condition1, consequent, condition2, otherwise) {
   this.state.body.push(
     'if (', condition1, '){', consequent, '} else if (',
-     condition2,'){', otherwise, '}');
+    condition2, '){', otherwise, '}');
 };
 
 
