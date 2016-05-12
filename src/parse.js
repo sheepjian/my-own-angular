@@ -318,7 +318,7 @@ ASTCompiler.prototype.compile = function(text) {
   /* jshint +W054 */
 };
 
-ASTCompiler.prototype.recurse = function(ast) {
+ASTCompiler.prototype.recurse = function(ast, context) {
   var that = this;
   var intoId;
   switch (ast.type) {
@@ -342,34 +342,59 @@ ASTCompiler.prototype.recurse = function(ast) {
       return '{' + properties.join(',') + '}';
     case AST.Identifier:
       intoId = ASTCompiler.scope;
+      var localMember = this.link(ASTCompiler.local, ast.name);
+      var scopeMember = this.link(ASTCompiler.scope, ast.name);
+      var condition = ASTCompiler.local + '&&' + localMember;
       if (ast.name !== 'this') {
         intoId = this.nextId();
-        var localMember = this.link(ASTCompiler.local, ast.name);
-        var scopeMember = this.link(ASTCompiler.scope, ast.name);
-
-        var condition = ASTCompiler.local + '&&' + localMember;
         this.ifelseif_(condition, this.assign(intoId,
             localMember), ASTCompiler.scope,
           this.assign(intoId, scopeMember));
+      }
+      if (context) {
+        context.context = condition + '?' + ASTCompiler.local + ':' + ASTCompiler.scope;
+        context.name = ast.name;
+        context.computed = false;
       }
       return intoId;
     case AST.MemberExpression:
       intoId = this.nextId();
       var left = this.recurse(ast.object);
+      if (context) {
+        context.context = left;
+      }
       if (ast.computed) {
         var right = this.recurse(ast.property);
         this.if_(left, this.assign(intoId,
           this.index(left, right)));
+        if (context) {
+          context.name = right;
+          context.computed = true;
+        }
       } else {
         this.if_(left, this.assign(intoId,
           this.link(left, ast.property.name)));
+        if (context) {
+          context.name = ast.property.name;
+          context.computed = false;
+        }
       }
       return intoId;
     case AST.CallExpression:
-      var callee = this.recurse(ast.callee);
+      var callContext = {};
+      var callee = this.recurse(ast.callee, callContext);
       var args = _.map(ast.args, function(arg) {
         return that.recurse(arg);
       });
+      if (callContext.name) {
+        if (callContext.computed) {
+          callee = this.index(callContext.context,
+            callContext.name);
+        } else {
+          callee = this.link(callContext.context,
+            callContext.name);
+        }
+      }
       return callee + '&&' + callee + '(' + args.join(',') + ')';
     default:
       throw "Unknown Token type: " + ast.type;
