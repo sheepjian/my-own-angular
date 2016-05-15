@@ -9,6 +9,33 @@ function Lexer() {
   this.tokens = [];
 }
 
+Lexer.OPERATORS = {
+  '+': {
+    unary: true,
+    binary: true
+  },
+  '!': {
+    unary: true,
+    binary: false
+  },
+  '-': {
+    unary: true,
+    binary: true
+  },
+  '*': {
+    unary: false,
+    binary: true
+  },
+  '/': {
+    unary: false,
+    binary: true
+  },
+  '%': {
+    unary: false,
+    binary: true
+  }
+};
+
 Lexer.prototype.lex = function(text) {
   // Tokenization will be done here
   this.text = text;
@@ -19,7 +46,7 @@ Lexer.prototype.lex = function(text) {
       this.readNumber();
     } else if (this.ch === '\'' || this.ch === '"') {
       this.readString();
-    } else if (this.isOperator(this.ch)) {
+    } else if (this.isBuildingOperator(this.ch)) {
       this.tokens.push({
         text: this.ch
       });
@@ -29,7 +56,17 @@ Lexer.prototype.lex = function(text) {
     } else if (this.isSpace(this.ch)) {
       this.index++;
     } else {
-      throw "Unexpected next character: " + this.ch;
+      var op = Lexer.OPERATORS[this.ch];
+      if (op) {
+        this.tokens.push({ 
+          text: this.ch, 
+          unary: op.unary,
+          binary: op.binary 
+        });
+        this.index++;
+      } else {
+        throw "Unexpected next character: " + this.ch;
+      }
     }
   }
   return this.tokens;
@@ -41,7 +78,7 @@ Lexer.prototype.peek = function() {
     false;
 };
 
-Lexer.prototype.isOperator = function(ch) {
+Lexer.prototype.isBuildingOperator = function(ch) {
   return ch.match(/[\[\],.\{\}\:()=]/);
 };
 
@@ -168,6 +205,8 @@ AST.Identifier = "Identifier";
 AST.MemberExpression = "MemberExpression";
 AST.CallExpression = "CallExpression";
 AST.AssignExpression = "AssignExpression";
+AST.UnaryExpression = 'UnaryExpression';
+AST.BinaryExpression = 'BinaryExpression';
 
 
 // build the tree node: {value:'', type:''}
@@ -182,13 +221,41 @@ AST.prototype.program = function() {
 };
 
 AST.prototype.assignment = function() {
-  var left = this.parse();
+  var left = this.binary();
   if (this.detect('=')) {
-    var right = this.parse();
+    var right = this.binary();
     return {
       type: AST.AssignExpression,
       left: left,
       right: right
+    };
+  }
+  return left;
+};
+
+AST.prototype.unary = function() {
+  if (this.peek().unary) {
+    var operator = this.consume().text;
+    return {
+      type: AST.UnaryExpression,
+      operator: operator,
+      value: this.unary()
+    };
+  } else {
+    return this.parse();
+  }
+};
+
+AST.prototype.binary = function() {
+  var left = this.unary();
+  var token;
+  while((token= this.peek()) && token.binary) {
+    var operator = this.consume().text;
+    left = {
+      type: AST.BinaryExpression,
+      left: left,
+      operator: operator,
+      right: this.unary()
     };
   }
   return left;
@@ -337,6 +404,10 @@ function ensureSafeObject(obj) {
   return obj;
 }
 
+function ifDefined(value, defaultValue) {
+  return typeof value === 'undefined' ? defaultValue : value;
+}
+
 var CALL = Function.prototype.call;
 var APPLY = Function.prototype.apply;
 var BIND = Function.prototype.bind;
@@ -362,6 +433,7 @@ ASTCompiler.local = "local";
 ASTCompiler.ensureSafeMemberName = 'ensureSafeMemberName';
 ASTCompiler.ensureSafeObject = 'ensureSafeObject';
 ASTCompiler.ensureSafeFunction = 'ensureSafeFunction';
+ASTCompiler.ifDefined = 'ifDefined';
 
 ASTCompiler.prototype.compile = function(text) {
   var ast = this.astBuilder.ast(text);
@@ -380,10 +452,12 @@ ASTCompiler.prototype.compile = function(text) {
   return new Function(ASTCompiler.ensureSafeMemberName,
     ASTCompiler.ensureSafeObject,
     ASTCompiler.ensureSafeFunction,
+    ASTCompiler.ifDefined,
     fnString)(
     ensureSafeMemberName,
     ensureSafeObject,
-    ensureSafeFunction);
+    ensureSafeFunction,
+    ifDefined);
   /* jshint +W054 */
 };
 
@@ -520,9 +594,25 @@ ASTCompiler.prototype.recurse = function(ast, context, create) {
       }
       return this.assign(leftExpr,
         this.ensureSafeObject(this.recurse(ast.right)));
+    case AST.UnaryExpression:
+      return ast.operator +
+        '(' +
+        this.ifDefined(this.recurse(ast.value), 0) +
+        ')';
+    case AST.BinaryExpression:
+      return '(' + this.ifDefined(this.recurse(ast.left), 0) +
+        ')' + ast.operator + '(' + 
+        this.ifDefined(this.recurse(ast.right), 0) + ')';
     default:
       throw "Unknown Token type: " + ast.type;
   }
+};
+
+ASTCompiler.prototype.ifDefined = function(value,
+  defaultValue) {
+  return ASTCompiler.ifDefined + '(' +
+    value + ',' +
+    this.escape(defaultValue) + ')';
 };
 
 ASTCompiler.prototype.nextId = function() {
