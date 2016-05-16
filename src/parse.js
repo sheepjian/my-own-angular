@@ -9,10 +9,15 @@ function Lexer() {
   this.tokens = [];
 }
 
+Lexer.COM = 1;
+Lexer.EQ = 2;
+Lexer.ADD = 3;
+Lexer.MUL = 4;
+
 Lexer.OPERATORS = {
   '+': {
     unary: true,
-    binary: true
+    binary: Lexer.ADD
   },
   '!': {
     unary: true,
@@ -20,19 +25,51 @@ Lexer.OPERATORS = {
   },
   '-': {
     unary: true,
-    binary: true
+    binary: Lexer.ADD
   },
   '*': {
     unary: false,
-    binary: true
+    binary: Lexer.MUL
   },
   '/': {
     unary: false,
-    binary: true
+    binary: Lexer.MUL
   },
   '%': {
     unary: false,
-    binary: true
+    binary: Lexer.MUL
+  },
+  '<': {
+    unary: false,
+    binary: Lexer.COM
+  },
+  '>': {
+    unary: false,
+    binary: Lexer.COM
+  },
+  '>=': {
+    unary: false,
+    binary: Lexer.COM
+  },
+  '<=': {
+    unary: false,
+    binary: Lexer.COM
+  },
+  '==': {
+    unary: false,
+    binary: Lexer.EQ
+  },
+  '===': {
+    unary: false,
+    binary: Lexer.EQ
+  },
+  '!=': {
+    unary: false,
+    binary: Lexer.EQ
+  },
+  '!==': {
+    unary: false,
+    binary: Lexer.EQ
   }
 };
 
@@ -206,7 +243,8 @@ AST.MemberExpression = "MemberExpression";
 AST.CallExpression = "CallExpression";
 AST.AssignExpression = "AssignExpression";
 AST.UnaryExpression = 'UnaryExpression';
-AST.BinaryExpression = 'BinaryExpression';
+AST.MultiplicativeExpression = 'MultiplicativeExpression';
+AST.AdditiveExpression = 'AdditiveExpression';
 
 
 // build the tree node: {value:'', type:''}
@@ -221,13 +259,45 @@ AST.prototype.program = function() {
 };
 
 AST.prototype.assignment = function() {
-  var left = this.binary();
+  var left = this.additive();
   if (this.detect('=')) {
-    var right = this.binary();
+    var right = this.additive();
     return {
       type: AST.AssignExpression,
       left: left,
       right: right
+    };
+  }
+  return left;
+};
+
+AST.prototype.additive = function() {
+  var left = this.multiplicative();
+  var token;
+  while((token= this.peek()) && 
+    token.binary === Lexer.ADD) {
+    var operator = this.consume().text;
+    left = {
+      type: AST.AdditiveExpression,
+      left: left,
+      operator: operator,
+      right: this.multiplicative()
+    };
+  }
+  return left;
+};
+
+AST.prototype.multiplicative = function() {
+  var left = this.unary();
+  var token;
+  while((token= this.peek()) && 
+    token.binary === Lexer.MUL) {
+    var operator = this.consume().text;
+    left = {
+      type: AST.MultiplicativeExpression,
+      left: left,
+      operator: operator,
+      right: this.unary()
     };
   }
   return left;
@@ -246,20 +316,6 @@ AST.prototype.unary = function() {
   }
 };
 
-AST.prototype.binary = function() {
-  var left = this.unary();
-  var token;
-  while((token= this.peek()) && token.binary) {
-    var operator = this.consume().text;
-    left = {
-      type: AST.BinaryExpression,
-      left: left,
-      operator: operator,
-      right: this.unary()
-    };
-  }
-  return left;
-};
 
 AST.prototype.parse = function() {
   var declaration;
@@ -599,7 +655,11 @@ ASTCompiler.prototype.recurse = function(ast, context, create) {
         '(' +
         this.ifDefined(this.recurse(ast.value), 0) +
         ')';
-    case AST.BinaryExpression:
+    case AST.MultiplicativeExpression:
+      return '(' + this.ifDefined(this.recurse(ast.left), 0) +
+        ')' + ast.operator + '(' + 
+        this.ifDefined(this.recurse(ast.right), 0) + ')';
+    case AST.AdditiveExpression:
       return '(' + this.ifDefined(this.recurse(ast.left), 0) +
         ')' + ast.operator + '(' + 
         this.ifDefined(this.recurse(ast.right), 0) + ')';
