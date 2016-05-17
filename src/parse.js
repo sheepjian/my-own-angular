@@ -9,6 +9,7 @@ function Lexer() {
   this.tokens = [];
 }
 
+Lexer.ASSIGN = 0;
 Lexer.COM = 1;
 Lexer.EQ = 2;
 Lexer.ADD = 3;
@@ -55,6 +56,10 @@ Lexer.OPERATORS = {
     unary: false,
     binary: Lexer.COM
   },
+  '=': {
+    unary: false,
+    binary: Lexer.ASSIGN
+  },
   '==': {
     unary: false,
     binary: Lexer.EQ
@@ -93,20 +98,35 @@ Lexer.prototype.lex = function(text) {
     } else if (this.isSpace(this.ch)) {
       this.index++;
     } else {
-      var op = Lexer.OPERATORS[this.ch];
-      if (op) {
-        this.tokens.push({ 
-          text: this.ch, 
-          unary: op.unary,
-          binary: op.binary 
-        });
-        this.index++;
-      } else {
-        throw "Unexpected next character: " + this.ch;
-      }
+      this.parseOperator();
     }
   }
   return this.tokens;
+};
+
+Lexer.prototype.parseOperator = function() {
+  var len = 0;
+  var str;
+  var op;
+  while (this.index + len < this.text.length) {
+    str = this.text.substr(this.index, len + 1);
+    if (Lexer.OPERATORS[str]) {
+      op = str;
+      len = len + 1;
+    } else {
+      break;
+    }
+  }
+  if (op) {
+    this.tokens.push({
+      text: op,
+      unary: Lexer.OPERATORS[op].unary,
+      binary: Lexer.OPERATORS[op].binary
+    });
+    this.index = this.index+len;
+  } else {
+    throw "Unexpected next character: " + this.ch;
+  }
 };
 
 Lexer.prototype.peek = function() {
@@ -116,7 +136,7 @@ Lexer.prototype.peek = function() {
 };
 
 Lexer.prototype.isBuildingOperator = function(ch) {
-  return ch.match(/[\[\],.\{\}\:()=]/);
+  return ch.match(/[\[\],.\{\}\:()]/);
 };
 
 Lexer.prototype.isNumber = function(ch) {
@@ -245,9 +265,10 @@ AST.AssignExpression = "AssignExpression";
 AST.UnaryExpression = 'UnaryExpression';
 AST.MultiplicativeExpression = 'MultiplicativeExpression';
 AST.AdditiveExpression = 'AdditiveExpression';
+AST.EqualityExpression = 'EqualityExpression';
+AST.RelationalExpression = 'RelationalExpression';
 
 
-// build the tree node: {value:'', type:''}
 AST.prototype.ast = function(text) {
   this.tokens = this.lexer.lex(text);
   // AST building will be done here
@@ -259,9 +280,9 @@ AST.prototype.program = function() {
 };
 
 AST.prototype.assignment = function() {
-  var left = this.additive();
+  var left = this.equality();
   if (this.detect('=')) {
-    var right = this.additive();
+    var right = this.equality();
     return {
       type: AST.AssignExpression,
       left: left,
@@ -271,10 +292,42 @@ AST.prototype.assignment = function() {
   return left;
 };
 
+AST.prototype.equality = function() {
+  var left = this.relational();
+  var token;
+  while ((token = this.peek()) &&
+    token.binary === Lexer.EQ) {
+    var operator = this.consume().text;
+    left = {
+      type: AST.EqualityExpression,
+      left: left,
+      operator: operator,
+      right: this.relational()
+    };
+  }
+  return left;
+};
+
+AST.prototype.relational = function() {
+  var left = this.additive();
+  var token;
+  while ((token = this.peek()) &&
+    token.binary === Lexer.COM) {
+    var operator = this.consume().text;
+    left = {
+      type: AST.RelationalExpression,
+      left: left,
+      operator: operator,
+      right: this.additive()
+    };
+  }
+  return left;
+};
+
 AST.prototype.additive = function() {
   var left = this.multiplicative();
   var token;
-  while((token= this.peek()) && 
+  while ((token = this.peek()) &&
     token.binary === Lexer.ADD) {
     var operator = this.consume().text;
     left = {
@@ -290,7 +343,7 @@ AST.prototype.additive = function() {
 AST.prototype.multiplicative = function() {
   var left = this.unary();
   var token;
-  while((token= this.peek()) && 
+  while ((token = this.peek()) &&
     token.binary === Lexer.MUL) {
     var operator = this.consume().text;
     left = {
@@ -657,11 +710,19 @@ ASTCompiler.prototype.recurse = function(ast, context, create) {
         ')';
     case AST.MultiplicativeExpression:
       return '(' + this.ifDefined(this.recurse(ast.left), 0) +
-        ')' + ast.operator + '(' + 
+        ')' + ast.operator + '(' +
         this.ifDefined(this.recurse(ast.right), 0) + ')';
     case AST.AdditiveExpression:
       return '(' + this.ifDefined(this.recurse(ast.left), 0) +
-        ')' + ast.operator + '(' + 
+        ')' + ast.operator + '(' +
+        this.ifDefined(this.recurse(ast.right), 0) + ')';
+    case AST.RelationalExpression:
+      return '(' + this.ifDefined(this.recurse(ast.left), 0) +
+        ')' + ast.operator + '(' +
+        this.ifDefined(this.recurse(ast.right), 0) + ')';
+    case AST.EqualityExpression:
+      return '(' + this.ifDefined(this.recurse(ast.left), 0) +
+        ')' + ast.operator + '(' +
         this.ifDefined(this.recurse(ast.right), 0) + ')';
     default:
       throw "Unknown Token type: " + ast.type;
