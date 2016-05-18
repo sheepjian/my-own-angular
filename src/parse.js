@@ -14,6 +14,9 @@ Lexer.COM = 1;
 Lexer.EQ = 2;
 Lexer.ADD = 3;
 Lexer.MUL = 4;
+Lexer.AND = 5;
+Lexer.OR = 6;
+Lexer.BIT = 7;
 
 Lexer.OPERATORS = {
   '+': {
@@ -75,6 +78,22 @@ Lexer.OPERATORS = {
   '!==': {
     unary: false,
     binary: Lexer.EQ
+  },
+  '&&': {
+    unary: false,
+    binary: Lexer.AND
+  },
+  '||': {
+    unary: false,
+    binary: Lexer.OR
+  },
+  '&': {
+    unary: false,
+    binary: Lexer.BIT
+  },
+  '|': {
+    unary: false,
+    binary: Lexer.BIT
   }
 };
 
@@ -123,9 +142,9 @@ Lexer.prototype.parseOperator = function() {
       unary: Lexer.OPERATORS[op].unary,
       binary: Lexer.OPERATORS[op].binary
     });
-    this.index = this.index+len;
+    this.index = this.index + len;
   } else {
-    throw "Unexpected next character: " + this.ch;
+    throw "Unexpected next character: " + this.ch + ', ' + this.text + ': ' + this.index + ',' + len;
   }
 };
 
@@ -136,7 +155,7 @@ Lexer.prototype.peek = function() {
 };
 
 Lexer.prototype.isBuildingOperator = function(ch) {
-  return ch.match(/[\[\],.\{\}\:()]/);
+  return ch.match(/[\[\],.\{\}\:()?;]/);
 };
 
 Lexer.prototype.isNumber = function(ch) {
@@ -267,6 +286,8 @@ AST.MultiplicativeExpression = 'MultiplicativeExpression';
 AST.AdditiveExpression = 'AdditiveExpression';
 AST.EqualityExpression = 'EqualityExpression';
 AST.RelationalExpression = 'RelationalExpression';
+AST.LogicalExpression = 'LogicalandExpression';
+AST.ConditionalExpression = 'ConditionalExpression';
 
 
 AST.prototype.ast = function(text) {
@@ -276,17 +297,74 @@ AST.prototype.ast = function(text) {
 };
 
 AST.prototype.program = function() {
-  return { type: AST.Program, body: this.assignment() };
+  var body = [];
+  while (true) {
+    if (this.tokens.length) {
+      body.push(this.assignment());
+    }
+    if (!this.detect(';')) {
+      return { type: AST.Program, body: body };
+    }
+  }
 };
 
 AST.prototype.assignment = function() {
-  var left = this.equality();
+  var left = this.ternary();
   if (this.detect('=')) {
-    var right = this.equality();
+    var right = this.ternary();
     return {
       type: AST.AssignExpression,
       left: left,
       right: right
+    };
+  }
+  return left;
+};
+
+AST.prototype.ternary = function() {
+  var test = this.logicalOR();
+  if (this.detect('?')) {
+    var consequent = this.assignment();
+    if (this.consume(':')) {
+      var alternate = this.assignment();
+      return {
+        type: AST.ConditionalExpression,
+        test: test,
+        consequent: consequent,
+        alternate: alternate
+      };
+    }
+  }
+  return test;
+};
+
+AST.prototype.logicalOR = function() {
+  var left = this.logicalAND();
+  var token;
+  while ((token = this.peek()) &&
+    token.binary === Lexer.OR) {
+    var operator = this.consume().text;
+    left = {
+      type: AST.LogicalExpression,
+      left: left,
+      operator: operator,
+      right: this.logicalAND()
+    };
+  }
+  return left;
+};
+
+AST.prototype.logicalAND = function() {
+  var left = this.equality();
+  var token;
+  while ((token = this.peek()) &&
+    token.binary === Lexer.AND) {
+    var operator = this.consume().text;
+    left = {
+      type: AST.LogicalExpression,
+      left: left,
+      operator: operator,
+      right: this.equality()
     };
   }
   return left;
@@ -372,7 +450,10 @@ AST.prototype.unary = function() {
 
 AST.prototype.parse = function() {
   var declaration;
-  if (this.detect('[')) {
+  if (this.detect('(')) {
+    declaration = this.assignment();
+    this.consume(')');
+  } else if (this.detect('[')) {
     declaration = this.arrayDeclaration();
   } else if (this.detect('{')) {
     declaration = this.objectDeclaration();
@@ -587,8 +668,11 @@ ASTCompiler.prototype.recurse = function(ast, context, create) {
   var intoId;
   switch (ast.type) {
     case AST.Program:
-      this.state.body.push('return  ',
-        this.recurse(ast.body), ';');
+      _.forEach(_.initial(ast.body), function(stmt) {
+        this.state.body.push(this.recurse(stmt), ';');
+      }, this);
+      this.state.body.push(
+        'return ', this.recurse(_.last(ast.body)), ';');
       break;
     case AST.Literal:
       return this.escape(ast.value);
@@ -724,6 +808,19 @@ ASTCompiler.prototype.recurse = function(ast, context, create) {
       return '(' + this.ifDefined(this.recurse(ast.left), 0) +
         ')' + ast.operator + '(' +
         this.ifDefined(this.recurse(ast.right), 0) + ')';
+    case AST.LogicalExpression:
+      return '(' + this.ifDefined(this.recurse(ast.left), 0) +
+        ')' + ast.operator + '(' +
+        this.ifDefined(this.recurse(ast.right), 0) + ')';
+    case AST.ConditionalExpression:
+      intoId = this.nextId();
+      var testId = this.nextId();
+      this.state.body.push(this.assign(testId, this.recurse(ast.test)));
+      this.if_(testId,
+        this.assign(intoId, this.recurse(ast.consequent)));
+      this.if_(this.not(testId),
+        this.assign(intoId, this.recurse(ast.alternate)));
+      return intoId;
     default:
       throw "Unknown Token type: " + ast.type;
   }
