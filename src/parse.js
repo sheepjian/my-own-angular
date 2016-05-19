@@ -669,8 +669,8 @@ ASTCompiler.prototype.recurse = function(ast, context, create) {
   switch (ast.type) {
     case AST.Program:
       _.forEach(_.initial(ast.body), function(stmt) {
-        this.state.body.push(this.recurse(stmt), ';');
-      }, this);
+        that.state.body.push(that.recurse(stmt), ';');
+      });
       this.state.body.push(
         'return ', this.recurse(_.last(ast.body)), ';');
       break;
