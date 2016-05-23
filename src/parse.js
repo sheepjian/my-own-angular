@@ -1,6 +1,7 @@
 'use strict';
 
 var _ = require('lodash');
+var filter = require('./filter').filter;
 
 function Lexer() {
   this.text = '';
@@ -17,6 +18,7 @@ Lexer.MUL = 4;
 Lexer.AND = 5;
 Lexer.OR = 6;
 Lexer.BIT = 7;
+Lexer.Filter = 8;
 
 Lexer.OPERATORS = {
   '+': {
@@ -93,7 +95,7 @@ Lexer.OPERATORS = {
   },
   '|': {
     unary: false,
-    binary: Lexer.BIT
+    binary: Lexer.Filter
   }
 };
 
@@ -300,12 +302,29 @@ AST.prototype.program = function() {
   var body = [];
   while (true) {
     if (this.tokens.length) {
-      body.push(this.assignment());
+      body.push(this.filter());
     }
     if (!this.detect(';')) {
       return { type: AST.Program, body: body };
     }
   }
+};
+
+AST.prototype.filter = function() {
+  var left = this.assignment();
+  while (this.detect('|')) {
+    var args = [left];
+    left = {
+      type: AST.CallExpression,
+      callee: this.identifier(),
+      arguments: args,
+      filter: true
+    };
+    while (this.detect(':')) {
+      args.push(this.assignment());
+    }
+  }
+  return left;
 };
 
 AST.prototype.assignment = function() {
@@ -451,7 +470,7 @@ AST.prototype.unary = function() {
 AST.prototype.parse = function() {
   var declaration;
   if (this.detect('(')) {
-    declaration = this.assignment();
+    declaration = this.filter();
     this.consume(')');
   } else if (this.detect('[')) {
     declaration = this.arrayDeclaration();
@@ -624,13 +643,15 @@ ASTCompiler.ensureSafeMemberName = 'ensureSafeMemberName';
 ASTCompiler.ensureSafeObject = 'ensureSafeObject';
 ASTCompiler.ensureSafeFunction = 'ensureSafeFunction';
 ASTCompiler.ifDefined = 'ifDefined';
+ASTCompiler.filter = 'filter';
 
 ASTCompiler.prototype.compile = function(text) {
   var ast = this.astBuilder.ast(text);
   // AST compilation will be done here
-  this.state = { body: [], nextId: 0, vars: [] };
+  this.state = { body: [], nextId: 0, vars: [], filters: {} };
   this.recurse(ast);
-  var fnString = 'var fn=function(' +
+  var fnString = this.filterPrefix() +
+    'var fn=function(' +
     ASTCompiler.scope + ',' +
     ASTCompiler.local + '){' +
     (this.state.vars.length ? 'var ' +
@@ -638,16 +659,19 @@ ASTCompiler.prototype.compile = function(text) {
     ) +
     this.state.body.join('') + '}; return fn;';
   //console.log(this.state);
+  //console.log(fnString);
   /* jshint -W054 */
   return new Function(ASTCompiler.ensureSafeMemberName,
     ASTCompiler.ensureSafeObject,
     ASTCompiler.ensureSafeFunction,
     ASTCompiler.ifDefined,
+    ASTCompiler.filter,
     fnString)(
     ensureSafeMemberName,
     ensureSafeObject,
     ensureSafeFunction,
-    ifDefined);
+    ifDefined,
+    filter);
   /* jshint +W054 */
 };
 
@@ -661,6 +685,19 @@ ASTCompiler.prototype.addEnsureSafeMemberName = function(expr) {
 
 ASTCompiler.prototype.addEnsureSafeObject = function(expr) {
   this.state.body.push(this.ensureSafeObject(expr) + ';');
+};
+
+ASTCompiler.prototype.filterPrefix = function() {
+  if (_.isEmpty(this.state.filters)) {
+    return '';
+  } else {
+    var that = this;
+    var parts = _.map(this.state.filters, function(varName, filterName) {
+      return varName + '=' +
+        'filter(' + that.escape(filterName) + ')';
+    });
+    return 'var ' +parts.join(',') + ';';
+  }
 };
 
 ASTCompiler.prototype.recurse = function(ast, context, create) {
@@ -755,22 +792,30 @@ ASTCompiler.prototype.recurse = function(ast, context, create) {
       }
       return intoId;
     case AST.CallExpression:
-      var callContext = {};
-      var callee = this.recurse(ast.callee, callContext);
-      var args = _.map(ast.args, function(arg) {
-        return that.ensureSafeObject(that.recurse(arg));
-      });
-      if (callContext.name) {
-        this.addEnsureSafeObject(callContext.context);
-        if (callContext.computed) {
-          callee = this.index(callContext.context,
-            callContext.name);
-        } else {
-          callee = this.link(callContext.context,
-            callContext.name);
+      var callContext, callee, args;
+      if (ast.filter) {
+        callee = this.filter(ast.callee.name);
+        args = _.map(ast.arguments, function(arg) {
+          return that.recurse(arg);
+        });
+      } else {
+        callContext = {};
+        callee = this.recurse(ast.callee, callContext);
+        args = _.map(ast.args, function(arg) {
+          return that.ensureSafeObject(that.recurse(arg));
+        });
+        if (callContext.name) {
+          this.addEnsureSafeObject(callContext.context);
+          if (callContext.computed) {
+            callee = this.index(callContext.context,
+              callContext.name);
+          } else {
+            callee = this.link(callContext.context,
+              callContext.name);
+          }
         }
+        this.addEnsureSafeFunction(callee);
       }
-      this.addEnsureSafeFunction(callee);
       return callee + '&&' +
         this.ensureSafeObject(
           callee + '(' + args.join(',') + ')');
@@ -833,10 +878,19 @@ ASTCompiler.prototype.ifDefined = function(value,
     this.escape(defaultValue) + ')';
 };
 
-ASTCompiler.prototype.nextId = function() {
+ASTCompiler.prototype.nextId = function(skip) {
   var id = 'v' + (this.state.nextId++);
-  this.state.vars.push(id);
+  if (!skip) {
+    this.state.vars.push(id);
+  }
   return id;
+};
+
+ASTCompiler.prototype.filter = function(name) {
+  if (!this.state.filters.hasOwnProperty(name)) {
+    this.state.filters[name] = this.nextId(true);
+  }
+  return this.state.filters[name];
 };
 
 ASTCompiler.prototype.ensureSafeMemberName = function(mem) {
