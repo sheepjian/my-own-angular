@@ -1,5 +1,6 @@
 'use strict';
 var _ = require('lodash');
+var parse = require('./parse');
 
 function Scope() {
     this.$$watchers = [];
@@ -129,7 +130,7 @@ Scope.prototype.$digest = function(isSuperDigest) {
 
 Scope.prototype.$watch = function(watchFn, listenFn, valueEq) {
     var watcher = {
-        watchFn: watchFn,
+        watchFn: parse(watchFn),
         listenFn: listenFn || function() {},
         last: initWatchVal,
         valueEq: !!valueEq
@@ -283,6 +284,8 @@ Scope.prototype.$watchCollection = function(watchFn, listenerFn) {
     var oldLength = 0;
     var firstRun = true;
     var trackLastOldValue = listenerFn.length > 1;
+
+    watchFn = parse(watchFn);
 
     var internalWatchFn = function(scope) {
         newValue = watchFn(scope);

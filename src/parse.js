@@ -696,7 +696,7 @@ ASTCompiler.prototype.filterPrefix = function() {
       return varName + '=' +
         'filter(' + that.escape(filterName) + ')';
     });
-    return 'var ' +parts.join(',') + ';';
+    return 'var ' + parts.join(',') + ';';
   }
 };
 
@@ -957,9 +957,15 @@ Parser.prototype.parse = function(text) {
 };
 
 function parse(expr) {
-  var lexer = new Lexer();
-  var parser = new Parser(lexer);
-  return parser.parse(expr);
+  if (_.isFunction(expr)) {
+    return expr;
+  } else if (typeof expr === 'string') {
+    var lexer = new Lexer();
+    var parser = new Parser(lexer);
+    return parser.parse(expr);
+  } else {
+    return _.noop;
+  }
 }
 
 module.exports = parse;
