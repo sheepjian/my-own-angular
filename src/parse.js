@@ -647,6 +647,7 @@ ASTCompiler.filter = 'filter';
 
 ASTCompiler.prototype.compile = function(text) {
   var ast = this.astBuilder.ast(text);
+  this.markConstantExpressions(ast);
   // AST compilation will be done here
   this.state = { body: [], nextId: 0, vars: [], filters: {} };
   this.recurse(ast);
@@ -661,7 +662,7 @@ ASTCompiler.prototype.compile = function(text) {
   //console.log(this.state);
   //console.log(fnString);
   /* jshint -W054 */
-  return new Function(ASTCompiler.ensureSafeMemberName,
+  var fn = new Function(ASTCompiler.ensureSafeMemberName,
     ASTCompiler.ensureSafeObject,
     ASTCompiler.ensureSafeFunction,
     ASTCompiler.ifDefined,
@@ -672,7 +673,96 @@ ASTCompiler.prototype.compile = function(text) {
     ensureSafeFunction,
     ifDefined,
     filter);
+  fn.literal = this.isLiteral(ast);
+  fn.constant = ast.constant;
+  return fn;
   /* jshint +W054 */
+};
+
+ASTCompiler.prototype.isLiteral = function(ast) {
+  return ast.body.length === 0 ||
+    ast.body.length === 1 && (
+      ast.body[0].type === AST.Literal ||
+      ast.body[0].type === AST.ArrayExpression ||
+      ast.body[0].type === AST.ObjectExpression);
+};
+
+ASTCompiler.prototype.markConstantExpressions = function(ast) {
+  var allConstants;
+  var that = this;
+  switch (ast.type) {
+    case AST.Program:
+      allConstants = true;
+      _.forEach(ast.body, function(expr) {
+        that.markConstantExpressions(expr);
+        allConstants = allConstants && expr.constant;
+      });
+      ast.constant = allConstants;
+      break;
+    case AST.Literal:
+      ast.constant = true;
+      break;
+    case AST.Identifier:
+      ast.constant = false;
+      break;
+    case AST.ArrayExpression:
+      allConstants = true;
+      _.forEach(ast.value, function(element) {
+        that.markConstantExpressions(element);
+        allConstants = allConstants && element.constant;
+      });
+      ast.constant = allConstants;
+      break;
+    case AST.ObjectExpression:
+      allConstants = true;
+      _.forEach(ast.value, function(property) {
+        that.markConstantExpressions(property.value);
+        allConstants = allConstants && property.value.constant;
+      });
+      ast.constant = allConstants;
+      break;
+    case AST.MemberExpression:
+      this.markConstantExpressions(ast.object);
+      if (ast.computed) {
+        this.markConstantExpressions(ast.property);
+      }
+      ast.constant = ast.object.constant &&
+        (!ast.computed || ast.property.constant);
+      break;
+    case AST.CallExpression:
+      allConstants = ast.filter ? true : false;
+      _.forEach(ast.arguments, function(arg) {
+        that.markConstantExpressions(arg);
+        allConstants = allConstants && arg.constant;
+      });
+      ast.constant = allConstants;
+      break;
+    case AST.AssignExpression:
+      this.markConstantExpressions(ast.left);
+      this.markConstantExpressions(ast.right);
+      ast.constant = ast.left.constant && ast.right.constant;
+      break;
+    case AST.UnaryExpression:
+      this.markConstantExpressions(ast.value);
+      ast.constant = ast.value.constant;
+      break;
+    case AST.MultiplicativeExpression:
+    case AST.AdditiveExpression:
+    case AST.EqualityExpression:
+    case AST.RelationalExpression:
+    case AST.LogicalExpression:
+      this.markConstantExpressions(ast.left);
+      this.markConstantExpressions(ast.right);
+      ast.constant = ast.left.constant && ast.right.constant;
+      break;
+    case AST.ConditionalExpression:
+      this.markConstantExpressions(ast.test);
+      this.markConstantExpressions(ast.consequent);
+      this.markConstantExpressions(ast.alternate);
+      ast.constant =
+        ast.test.constant && ast.consequent.constant && ast.alternate.constant;
+      break;
+  }
 };
 
 ASTCompiler.prototype.addEnsureSafeFunction = function(expr) {

@@ -150,7 +150,12 @@ Scope.prototype.$watch = function(watchFn, listenFn, valueEq) {
 
 Scope.prototype.$eval = function(evalFn, args) {
     try {
-        return evalFn(this, args);
+        evalFn = parse(evalFn);
+        if(_.isFunction(evalFn)) {
+            return evalFn(this, args);
+        } else {
+            return evalFn;
+        }
     } catch (e) {
         // leave it alone, will delegate the task to $exceptionService
         //console.error(e);
@@ -170,12 +175,14 @@ Scope.prototype.$evalAsync = function(evalFn) {
 
 Scope.prototype.$apply = function(applyFn) {
     // don't use apply in the mid of the digest phase
+    var result;
     try {
         this.$beginPhase('$apply');
-        this.$eval(applyFn);
+        result = this.$eval(applyFn);
     } finally {
         this.$clearPhase();
         this.$$root.$digest();
+        return result;
     }
 };
 
@@ -411,7 +418,6 @@ Scope.prototype.$$everyScope = function(fn) {
         return false;
     }
 };
-
 
 Scope.prototype.$broadcast = function(eventName) {
     var event = {
