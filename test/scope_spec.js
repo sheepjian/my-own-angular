@@ -795,7 +795,7 @@ describe("Scope--->", function() {
       expect(scope.$$watchers.length).toBe(0);
     });
 
-    /*it('does not re-evaluate an array if its contents do not change', function() {
+    it('does not re-evaluate an array if its contents do not change', function() {
       var values = [];
 
       scope.a = 1;
@@ -805,6 +805,7 @@ describe("Scope--->", function() {
       scope.$watch('[a, b, c]', function(value) {
         values.push(value);
       });
+
       scope.$digest();
       expect(values.length).toBe(1);
       expect(values[0]).toEqual([1, 2, 3]);
@@ -850,7 +851,7 @@ describe("Scope--->", function() {
         expect(called).toBe(true);
         done();
       });
-    });*/
+    });
 
 
   });
