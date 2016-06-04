@@ -290,6 +290,7 @@ AST.EqualityExpression = 'EqualityExpression';
 AST.RelationalExpression = 'RelationalExpression';
 AST.LogicalExpression = 'LogicalandExpression';
 AST.ConditionalExpression = 'ConditionalExpression';
+AST.NGValueParameter = "NGValueParameter";
 
 
 AST.prototype.ast = function(text) {
@@ -638,14 +639,16 @@ function ASTCompiler(astBuilder) {
 
 ASTCompiler.scope = "scope";
 ASTCompiler.local = "local";
-
+ASTCompiler.value = 'value';
 ASTCompiler.ensureSafeMemberName = 'ensureSafeMemberName';
 ASTCompiler.ensureSafeObject = 'ensureSafeObject';
 ASTCompiler.ensureSafeFunction = 'ensureSafeFunction';
 ASTCompiler.ifDefined = 'ifDefined';
 ASTCompiler.filter = 'filter';
 ASTCompiler.inputStage = 'inputStage';
+ASTCompiler.assignStage = 'assignStage';
 ASTCompiler.mainStage = 'mainStage';
+
 
 function getInputs(ast) {
   if (ast.length !== 1) {
@@ -654,6 +657,20 @@ function getInputs(ast) {
   var candidate = ast[0].toWatch;
   if (candidate.length !== 1 || candidate[0] !== ast[0]) {
     return candidate;
+  }
+}
+
+function isAssignable(ast) {
+  return ast.type === AST.Identifier || ast.type == AST.MemberExpression;
+}
+
+function assignableAST(ast) {
+  if (ast.body.length == 1 && isAssignable(ast.body[0])) {
+    return {
+      type: AST.AssignExpression,
+      left: ast.body[0],
+      right: { type: AST.NGValueParameter }
+    };
   }
 }
 
@@ -666,7 +683,8 @@ ASTCompiler.prototype.compile = function(text) {
     vars: [],
     filters: {},
     fn: { body: [], vars: [] },
-    inputs: []
+    inputs: [],
+    assign: { body: [], vars: [] }
   };
   this.stage = ASTCompiler.inputStage;
   var that = this;
@@ -678,6 +696,24 @@ ASTCompiler.prototype.compile = function(text) {
       'return ' + that.recurse(input) + ';');
     that.state.inputs.push(inputKey);
   });
+  this.stage = ASTCompiler.assignStage;
+  var assignable = assignableAST(ast);
+  var assignFn = '';
+  if (assignable) {
+    this.state.computing = 'assign';
+    this.state.assign.body.push(this.recurse(assignable));
+    assignFn = 'fn.assign = function(' +
+      ASTCompiler.scope + ',' +
+      ASTCompiler.value + ',' +
+      ASTCompiler.local + '){' +
+      (this.state.assign.vars.length ?
+        'var ' + this.state.assign.vars.join(',') + ';' :
+        ''
+      ) +
+      this.state.assign.body.join('') +
+      '};';
+  }
+
   this.stage = ASTCompiler.mainStage;
   this.state.computing = 'fn';
   this.recurse(ast);
@@ -690,6 +726,7 @@ ASTCompiler.prototype.compile = function(text) {
     ) +
     this.state.fn.body.join('') + '};' +
     this.watchFns() +
+    assignFn +
     'return fn;';
   /*console.log(this.state);
   console.log(fnString);
@@ -718,8 +755,8 @@ ASTCompiler.prototype.watchFns = function() {
   var that = this;
   _.forEach(this.state.inputs, function(inputName) {
     result.push('var ', inputName, '=function(' +
-        ASTCompiler.scope + ',' +
-        ASTCompiler.local + ') {',
+      ASTCompiler.scope + ',' +
+      ASTCompiler.local + ') {',
       (that.state[inputName].vars.length ?
         'var ' + that.state[inputName].vars.join(',') + ';' :
         ''
@@ -733,7 +770,6 @@ ASTCompiler.prototype.watchFns = function() {
 
   return result.join('');
 };
-
 
 ASTCompiler.prototype.isLiteral = function(ast) {
   return ast.body.length === 0 ||
@@ -800,7 +836,8 @@ ASTCompiler.prototype.markConstantAndWatchExpressions = function(ast) {
       ast.toWatch = [ast];
       break;
     case AST.CallExpression:
-      allConstants = ast.filter ? true : false;
+      var stateless = ast.filter && !filter(ast.callee.name).$stateful;
+      allConstants = stateless ? true : false;
       argsToWatch = [];
       _.forEach(ast.arguments, function(arg) {
         that.markConstantAndWatchExpressions(arg);
@@ -810,7 +847,7 @@ ASTCompiler.prototype.markConstantAndWatchExpressions = function(ast) {
         }
       });
       ast.constant = allConstants;
-      ast.toWatch = ast.filter ? argsToWatch : [ast];
+      ast.toWatch = stateless ? argsToWatch : [ast];
       break;
     case AST.AssignExpression:
       this.markConstantAndWatchExpressions(ast.left);
@@ -893,12 +930,17 @@ ASTCompiler.prototype.recurse = function(ast, context, create) {
       });
       return '[' + elements.join(',') + ']';
     case AST.ObjectExpression:
+      intoId = this.nextId();
       var properties = _.map(ast.value, function(property) {
         var key = property.key.type === AST.Identifier ? property.key.name : that.escape(property.key.value);
         var value = that.recurse(property.value);
         return key + ':' + value;
       });
-      return '{' + properties.join(',') + '}';
+      this.state[this.state.computing].body.push(
+        this.assign(intoId, 
+          '{' + properties.join(',') + '}')
+      );
+      return intoId;
     case AST.Identifier:
       ensureSafeMemberName(ast.name);
       intoId = ASTCompiler.scope;
@@ -1046,6 +1088,8 @@ ASTCompiler.prototype.recurse = function(ast, context, create) {
       this.if_(this.not(testId),
         this.assign(intoId, this.recurse(ast.alternate)));
       return intoId;
+    case AST.NGValueParameter:
+      return ASTCompiler.value;
     default:
       throw "Unknown Token type: " + ast.type;
   }

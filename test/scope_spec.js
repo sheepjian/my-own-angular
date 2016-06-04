@@ -2,6 +2,7 @@
 
 var Scope = require('../src/scope');
 var _ = require('lodash');
+var register = require('../src/filter').register;
 
 describe("Scope--->", function() {
   it("can be constructed and used as an object", function() {
@@ -819,6 +820,30 @@ describe("Scope--->", function() {
       expect(values[1]).toEqual([1, 2, 4]);
 
     });
+
+    it('allows $stateful filter value to change over time', function(done) {
+
+      register('withTime', function() {
+        return _.extend(function(v) {
+          return new Date().toISOString() + ': ' + v;
+        }, {
+          $stateful: true
+        });
+      });
+
+      var listenerSpy = jasmine.createSpy();
+      scope.$watch('42 | withTime', listenerSpy);
+      scope.$digest();
+      var firstValue = listenerSpy.calls.mostRecent().args[0];
+
+      setTimeout(function() {
+        scope.$digest();
+        var secondValue = listenerSpy.calls.mostRecent().args[0];
+        expect(secondValue).not.toEqual(firstValue);
+        done();
+      }, 100);
+    });
+
 
     it('accepts expressions for watchCollection', function() {
       var theValue;
