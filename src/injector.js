@@ -18,6 +18,19 @@ function createInjector(modulesToLoad) {
     },
     get: function(key) {
       return cache[key];
+    },
+    invoke: function(fn, context, override) {
+      var args = _.map(fn.$inject, function(key) {
+        if (_.isString(key)) {
+          if (override && override[key])
+            return override[key];
+          else
+            return cache[key];
+        } else {
+          throw 'Incorrect injection token! Expected a string, got' + key;
+        }
+      });
+      return fn.apply(context, args);
     }
   };
 

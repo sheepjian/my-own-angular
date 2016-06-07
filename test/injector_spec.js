@@ -87,5 +87,59 @@ describe('injector', function() {
     createInjector(['myModule']);
   });
 
+  it('invokes an annotated function with dependency injection', function() {
+    var module = window.angular.module('myModule', []);
+    module.constant('a', 1);
+    module.constant('b', 2);
+    var injector = createInjector(['myModule']);
+
+    var fn = function(one, two) {
+      return one + two; };
+    fn.$inject = ['a', 'b'];
+
+    expect(injector.invoke(fn)).toBe(3);
+  });
+
+  it('does not accept non-strings as injection tokens', function() {
+    var module = window.angular.module('myModule', []);
+    module.constant('a', 1);
+    var injector = createInjector(['myModule']);
+
+    var fn = function(one, two) { return one + two; };
+    fn.$inject = ['a', 2];
+
+    expect(function() {
+      injector.invoke(fn);
+    }).toThrow();
+  });
+
+  it('invokes a function with the given this context', function() {
+    var module = window.angular.module('myModule', []);
+    module.constant('a', 1);
+    var injector = createInjector(['myModule']);
+
+    var obj = {
+      two: 2,
+      fn: function(one) { return one + this.two; }
+    };
+    obj.fn.$inject = ['a'];
+
+    expect(injector.invoke(obj.fn, obj)).toBe(3);
+  });
+
+  it('overrides dependencies with locals when invoking', function() {
+    var module = window.angular.module('myModule', []);
+    module.constant('a', 1);
+    module.constant('b', 2);
+    var injector = createInjector(['myModule']);
+
+    var fn = function(one, two) { return one + two; };
+    fn.$inject = ['a', 'b'];
+
+    expect(injector.invoke(fn, undefined, {b: 3})).toBe(4);
+  });
+
+
+
 
 });
