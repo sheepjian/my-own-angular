@@ -94,7 +94,8 @@ describe('injector', function() {
     var injector = createInjector(['myModule']);
 
     var fn = function(one, two) {
-      return one + two; };
+      return one + two;
+    };
     fn.$inject = ['a', 'b'];
 
     expect(injector.invoke(fn)).toBe(3);
@@ -105,7 +106,8 @@ describe('injector', function() {
     module.constant('a', 1);
     var injector = createInjector(['myModule']);
 
-    var fn = function(one, two) { return one + two; };
+    var fn = function(one, two) {
+      return one + two; };
     fn.$inject = ['a', 2];
 
     expect(function() {
@@ -120,7 +122,8 @@ describe('injector', function() {
 
     var obj = {
       two: 2,
-      fn: function(one) { return one + this.two; }
+      fn: function(one) {
+        return one + this.two; }
     };
     obj.fn.$inject = ['a'];
 
@@ -133,10 +136,95 @@ describe('injector', function() {
     module.constant('b', 2);
     var injector = createInjector(['myModule']);
 
-    var fn = function(one, two) { return one + two; };
+    var fn = function(one, two) {
+      return one + two; };
     fn.$inject = ['a', 'b'];
 
-    expect(injector.invoke(fn, undefined, {b: 3})).toBe(4);
+    expect(injector.invoke(fn, undefined, { b: 3 })).toBe(4);
+  });
+
+  describe('-->annotate-->', function() {
+
+    it('returns a functions $inject annotation when it has one', function() {
+      var injector = createInjector([]);
+
+      var fn = function() {};
+      fn.$inject = ['a', 'b'];
+
+      expect(injector.annotate(fn)).toEqual(['a', 'b']);
+    });
+
+    it('returns the array-style annotations of a function', function() {
+      var injector = createInjector([]);
+
+      var fn = ['a', 'b', function() { }];
+
+      expect(injector.annotate(fn)).toEqual(['a', 'b']);
+    });
+
+    it('returns an empty array for a non-annotated function with no arguments', function() {
+      var injector = createInjector([]);
+
+      var fn = function() { };
+
+      expect(injector.annotate(fn)).toEqual([]);
+    });
+
+    it('returns annotations parsed from a non-annotated function', function() {
+      var injector = createInjector([]);
+
+      var fn = function(a, b) { };
+
+      expect(injector.annotate(fn)).toEqual(['a', 'b']);
+    });
+
+    it('strips comments from argument lists when parsing', function() {
+      var injector = createInjector([]);
+
+      var fn = function(a, /*b,*/ c) { };
+
+      expect(injector.annotate(fn)).toEqual(['a', 'c']);
+    });
+
+    it('strips several comments from argument lists when parsing', function() {
+      var injector = createInjector([]);
+
+      var fn = function(a, /*b,*/ c/*, d*/) { };
+
+      expect(injector.annotate(fn)).toEqual(['a', 'c']);
+    });
+
+    it('strips // comments from argument lists when parsing', function() {
+      var injector = createInjector([]);
+
+      var fn = function(a, //b,
+                        c) { };
+
+      expect(injector.annotate(fn)).toEqual(['a', 'c']);
+    });
+
+    it('strips surrounding underscores from argument names when parsing', function() {
+      var injector = createInjector([]);
+
+      var fn = function(a, _b_, c_, _d, an_argument) { };
+
+      expect(injector.annotate(fn)).toEqual(['a', 'b', 'c_', '_d', 'an_argument']);
+    });
+
+    it('throws when using a non-annotated function in strict mode', function() {
+      var injector = createInjector([], true);
+
+      var fn = function(a, b, c) { };
+
+      expect(function() {
+        injector.annotate(fn);
+      }).toThrow();
+    });
+
+
+
+
+
   });
 
 
