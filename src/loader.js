@@ -8,13 +8,18 @@ var createModule = function(name, requires, modules) {
   }
   var invokeQueue = [];
 
+  var registerProviderMethod = function(method) {
+    return function() {
+      invokeQueue.push([method, arguments]);
+      return moduleInstance;
+    };
+  };
+
   var moduleInstance = {
     name: name,
     requires: requires,
-    constant: function(key, value) {
-
-      invokeQueue.push(['constant', [key, value]]);
-    },
+    constant: registerProviderMethod('constant'),
+    provider: registerProviderMethod('provider'),
     _invokeQueue: invokeQueue
   };
   modules[name] = moduleInstance;
