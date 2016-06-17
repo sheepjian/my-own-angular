@@ -4,6 +4,7 @@ var _ = require('lodash');
 
 var FN_ARGS = /^function\s*[^\(]*\(\s*([^\)]*)\)/m;
 var FN_ARG = /^\s*(_?)(\S+?)\1\s*$/;
+var INSTANTIATING = {};
 
 function ensureSafeKey(name) {
   if (name === 'hasOwnProperty') {
@@ -16,15 +17,7 @@ function createInjector(modulesToLoad, strictDi) {
   var loadedModules = {};
   var providerCache = {};
   var instanceCache = {};
-
-  var getService = function(name) {
-    if (instanceCache.hasOwnProperty(name)) {
-      return instanceCache[name];
-    } else if (providerCache.hasOwnProperty(name + 'Provider')) {
-      var provider = providerCache[name + 'Provider'];
-      return invoke(provider.$get, provider);
-    }
-  };
+  var dependencyPath = [];
 
   var annotate = function(fn) {
     if (_.isArray(fn)) {
@@ -45,45 +38,83 @@ function createInjector(modulesToLoad, strictDi) {
     }
   };
 
-  var invoke = function(fn, context, locals) {
-    var args = _.map(annotate(fn), function(key) {
-      if (_.isString(key)) {
-        return locals && locals.hasOwnProperty(key) ?
-          locals[key] :
-          getService(key);
+  function createInternalInjector(cache, factoryFn) {
+    var getService = function(name) {
+      if (cache.hasOwnProperty(name)) {
+        if (cache[name] === INSTANTIATING) {
+          throw new Error('Circular dependency found: ' +
+            name + ' <- ' + dependencyPath.join(' <- '));
+        }
+        return cache[name];
       } else {
-        throw 'Incorrect injection token! Expected a string, got' + key;
+        try {
+          cache[name] = INSTANTIATING;
+          dependencyPath.unshift(name);
+          return (cache[name] = factoryFn(name));
+        } finally {
+          dependencyPath.shift();
+          if (cache[name] === INSTANTIATING) {
+            delete cache[name];
+          }
+        }
       }
-    });
-    if (_.isArray(fn)) {
-      fn = _.last(fn);
-    }
-    return fn.apply(context, args);
-  };
+    };
 
-  var injector = {
-    has: function(key) {
-      return instanceCache.hasOwnProperty(key) ||
-        providerCache.hasOwnProperty(key + 'Provider');
-    },
-    get: getService,
-    invoke: invoke,
-    annotate: annotate,
-    instantiate: function(type, locals) {
+    var invoke = function(fn, context, locals) {
+      var args = _.map(annotate(fn), function(key) {
+        if (_.isString(key)) {
+          return locals && locals.hasOwnProperty(key) ?
+            locals[key] :
+            getService(key);
+        } else {
+          throw 'Incorrect injection token! Expected a string, got' + key;
+        }
+      });
+      if (_.isArray(fn)) {
+        fn = _.last(fn);
+      }
+      return fn.apply(context, args);
+    };
+
+    var instantiate = function(type, locals) {
       var UnwrappedType = _.isArray(type) ? _.last(type) : type;
       var instance = Object.create(UnwrappedType.prototype);
-      this.invoke(type, instance, locals);
+      invoke(type, instance, locals);
       return instance;
-    }
-  };
+    };
+
+    return {
+      has: function(key) {
+        return instanceCache.hasOwnProperty(key) ||
+          providerCache.hasOwnProperty(key + 'Provider');
+      },
+      get: getService,
+      invoke: invoke,
+      annotate: annotate,
+      instantiate: instantiate
+    };
+  }
+
+  var providerInjector = createInternalInjector(providerCache, function() {
+    throw 'Unknown provider:  ' + dependencyPath.join(' <- ');
+  });
+
+  var instanceInjector = createInternalInjector(instanceCache, function(name) {
+    var provider = providerInjector.get(name + 'Provider');
+    return instanceInjector.invoke(provider.$get, provider);
+  });
 
   var $provide = {
     constant: function(key, value) {
       ensureSafeKey(key);
+      providerCache[key] = value;
       instanceCache[key] = value;
     },
     provider: function(key, provider) {
       ensureSafeKey(key);
+      if (_.isFunction(provider)) {
+        provider = providerInjector.instantiate(provider);
+      }
       providerCache[key + 'Provider'] = provider;
     }
   };
@@ -107,7 +138,7 @@ function createInjector(modulesToLoad, strictDi) {
     loadModule(moduleName);
   });
 
-  return injector;
+  return instanceInjector;
 }
 
 module.exports = createInjector;
