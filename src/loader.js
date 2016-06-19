@@ -2,15 +2,18 @@
 
 var _ = require('lodash');
 
-var createModule = function(name, requires, modules) {
+var createModule = function(name, requires, configFn, modules) {
   if (name === 'hasOwnProperty') {
     throw 'invalid module name: ' + name;
   }
   var invokeQueue = [];
+  var configBlocks = [];
 
-  var registerProviderMethod = function(method) {
+  var registerProviderMethod = function(service, method, arrayMethod, queue) {
     return function() {
-      invokeQueue.push([method, arguments]);
+      queue = queue || invokeQueue;
+      var item = [service, method, arguments];
+      queue[arrayMethod || 'push'](item);
       return moduleInstance;
     };
   };
@@ -18,10 +21,15 @@ var createModule = function(name, requires, modules) {
   var moduleInstance = {
     name: name,
     requires: requires,
-    constant: registerProviderMethod('constant'),
-    provider: registerProviderMethod('provider'),
-    _invokeQueue: invokeQueue
+    constant: registerProviderMethod('$provide','constant', 'unshift'),
+    provider: registerProviderMethod('$provide','provider'),
+    config: registerProviderMethod('$injector','invoke', 'push', configBlocks),
+    _invokeQueue: invokeQueue,
+    _configBlocks: configBlocks
   };
+  if(configFn) {
+    moduleInstance.config(configFn);
+  }
   modules[name] = moduleInstance;
   return moduleInstance;
 };
@@ -43,9 +51,9 @@ function setupModuleLoader(window) {
 
   angular.module = ensure(angular, 'module', function() {
     var modules = {};
-    return function(name, requires) {
+    return function(name, requires, configFn) {
       if (requires) {
-        return createModule(name, requires, modules);
+        return createModule(name, requires, configFn, modules);
       } else {
         return getModule(name, modules);
       }

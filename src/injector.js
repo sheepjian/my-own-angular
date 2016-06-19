@@ -73,6 +73,7 @@ function createInjector(modulesToLoad, strictDi) {
       if (_.isArray(fn)) {
         fn = _.last(fn);
       }
+
       return fn.apply(context, args);
     };
 
@@ -85,7 +86,7 @@ function createInjector(modulesToLoad, strictDi) {
 
     return {
       has: function(key) {
-        return instanceCache.hasOwnProperty(key) ||
+        return cache.hasOwnProperty(key) ||
           providerCache.hasOwnProperty(key + 'Provider');
       },
       get: getService,
@@ -104,7 +105,10 @@ function createInjector(modulesToLoad, strictDi) {
     return instanceInjector.invoke(provider.$get, provider);
   });
 
-  var $provide = {
+  instanceCache.$injector = instanceInjector;
+  providerCache.$injector = providerInjector;
+
+  var $provide = providerCache.$provide = {
     constant: function(key, value) {
       ensureSafeKey(key);
       providerCache[key] = value;
@@ -116,8 +120,20 @@ function createInjector(modulesToLoad, strictDi) {
         provider = providerInjector.instantiate(provider);
       }
       providerCache[key + 'Provider'] = provider;
+    },
+    config: function(fn) {
+      providerInjector.instantiate(fn);
     }
   };
+
+  function runInvokeQueue(queue) {
+    _.forEach(queue, function(invokeArgs) {
+      var service = providerInjector.get(invokeArgs[0]);
+      var method = invokeArgs[1];
+      var args = invokeArgs[2];
+      service[method].apply(service, args);
+    });
+  }
 
   function loadModule(moduleName) {
     if (!loadedModules.hasOwnProperty(moduleName)) {
@@ -126,11 +142,8 @@ function createInjector(modulesToLoad, strictDi) {
       _.forEach(module.requires, function(requireModule) {
         loadModule(requireModule);
       });
-      _.forEach(module._invokeQueue, function(invokeArgs) {
-        var method = invokeArgs[0];
-        var args = invokeArgs[1];
-        $provide[method].apply($provide, args);
-      });
+      runInvokeQueue(module._invokeQueue);
+      runInvokeQueue(module._configBlocks);
     }
   }
 
