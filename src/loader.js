@@ -24,7 +24,12 @@ var createModule = function(name, requires, configFn, modules) {
     constant: registerProviderMethod('$provide','constant', 'unshift'),
     provider: registerProviderMethod('$provide','provider'),
     config: registerProviderMethod('$injector','invoke', 'push', configBlocks),
+    run: function(fn) {
+      moduleInstance._runBlocks.push(fn);
+      return moduleInstance;
+    },
     _invokeQueue: invokeQueue,
+    _runBlocks: [],
     _configBlocks: configBlocks
   };
   if(configFn) {
