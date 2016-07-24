@@ -28,6 +28,7 @@ var createModule = function(name, requires, configFn, modules) {
     service: registerProviderMethod('$provide', 'service'),
     decorator: registerProviderMethod('$provide', 'decorator'),
     config: registerProviderMethod('$injector','invoke', 'push', configBlocks),
+    filter: registerProviderMethod('$filterProvider','register'),
     run: function(fn) {
       moduleInstance._runBlocks.push(fn);
       return moduleInstance;

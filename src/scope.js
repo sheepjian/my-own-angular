@@ -1,6 +1,7 @@
 'use strict';
 var _ = require('lodash');
-var parse = require('./parse');
+var parse;
+var TTL = 10;
 
 function Scope() {
   this.$$watchers = [];
@@ -95,7 +96,7 @@ Scope.prototype.$$digestOnce = function() {
 Scope.prototype.$digest = function(isSuperDigest) {
   var dirty;
   var counter = 0;
-  var upperBound = 10;
+  var upperBound = TTL;
   this.$$root.$$lastDirtyWatch = null;
   this.$beginPhase('$digest');
 
@@ -460,4 +461,20 @@ Scope.prototype.$$fireEventOnScope = function(eventName, listenerArgs) {
   }
 };
 
-module.exports = Scope;
+
+function $RootScopeProvider() {
+  this.digestTtl = function(value) {
+    if (_.isNumber(value)){
+      TTL = value;
+    }
+    return TTL;
+  };
+
+  this.$get = ['$parse', function($parse) {
+    parse = $parse;
+    var $rootScope = new Scope();
+    return $rootScope;
+  }];
+}
+
+module.exports = $RootScopeProvider;
