@@ -2,62 +2,86 @@
 
 var _ = require('lodash');
 
+var FULFILLED = 1;
+var REJECTED = 2;
+
 function qFactory(callLater) {
 
-  function scheduleProcessQueue(rootEval, state) {
-    rootEval(function() {
-      if (state.status > 0) {
-        _.forEach(state.pending, function(cb) {
-          cb(state.value);
+    function scheduleProcessQueue(rootEval, state) {
+        rootEval(function() {
+            if (state.status > 0) {
+                _.forEach(state.pending, function(handlers) {
+                    var fn = handlers[state.status];
+                    if(_.isFunction(fn)) 
+                      fn(state.value)
+                });
+                state.pending = [];
+            }
         });
-        state.pending = [];
-      }
-    });
-  }
+    }
 
-  function Promise() {
-    this.$$state = {
-      pending: [],
-      status: 0
+    function Promise() {
+        this.$$state = {
+            pending: [],
+            status: 0
+        };
+
+        this.then = function(resolveCb, rejectCb) {
+            this.$$state.pending.push([null, resolveCb, rejectCb]);
+            if (this.$$state.status > 0) {
+                scheduleProcessQueue(callLater, this.$$state);
+            }
+        };
+
+        this.catch = function(cb) {
+            return this.then(null, cb);
+        };
+
+        this.finally = function(cb) {
+            var fn = function() {
+              cb();
+            };
+            return this.then(fn, fn);
+        };
+    }
+
+    function Deferred() {
+        this.promise = new Promise();
+        this.resolve = function(val) {
+            if (this.promise.$$state.value !== undefined)
+                return;
+
+            this.promise.$$state.value = val;
+            this.promise.$$state.status = FULFILLED;
+            scheduleProcessQueue(callLater, this.promise.$$state);
+        };
+        this.reject = function(val) {
+            if (this.promise.$$state.value !== undefined)
+                return;
+
+            this.promise.$$state.value = val;
+            this.promise.$$state.status = REJECTED;
+            scheduleProcessQueue(callLater, this.promise.$$state);
+        };
+    }
+
+    var defer = function() {
+        return new Deferred();
     };
 
-    this.then = function(cb) {
-      this.$$state.pending.push(cb);
-      if (this.$$state.status > 0) {
-        scheduleProcessQueue(callLater, this.$$state);
-      }
+    var q = {
+        defer: defer
     };
-  }
 
-  function Deferred() {
-    this.promise = new Promise();
-    this.resolve = function(val) {
-      if (this.promise.$$state.value !== undefined)
-        return;
-
-      this.promise.$$state.value = val;
-      this.promise.$$state.status = 1;
-      scheduleProcessQueue(callLater, this.promise.$$state);
-    };
-  }
-
-  var defer = function() {
-    return new Deferred();
-  };
-
-  var q = {
-    defer: defer
-  };
-
-  return q;
+    return q;
 }
 
 function $QProvider() {
-  this.$get = ['$rootScope', function($rootScope) {
-    return qFactory(function(callback) {
-      $rootScope.$evalAsync(callback);
-    });
-  }];
+    this.$get = ['$rootScope', function($rootScope) {
+        return qFactory(function(callback) {
+            $rootScope.$evalAsync(callback);
+        });
+    }];
 }
 
 module.exports = $QProvider;
