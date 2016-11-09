@@ -8,3 +8,8 @@ This repository contains my work when reading the book [Build Your Own AngularJS
 
 
 ## Read, code, and think!
+
+## How to get started
+
+* Run "npm install" to install the environment
+* Run "npm test" to verify all tests are passed

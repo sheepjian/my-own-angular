@@ -10,10 +10,22 @@ function qFactory(callLater) {
     function scheduleProcessQueue(rootEval, state) {
         rootEval(function() {
             if (state.status > 0) {
+                var result;
                 _.forEach(state.pending, function(handlers) {
+                    var defer = handlers[0];
                     var fn = handlers[state.status];
-                    if(_.isFunction(fn)) 
-                      fn(state.value)
+                    try {
+                        if (_.isFunction(fn)) {
+                            defer.resolve(fn(state.value));
+                        } else {
+                            if (state.status == FULFILLED)
+                                defer.resolve(state.value);
+                            else
+                                defer.reject(state.value);
+                        }
+                    } catch (err) {
+                        defer.reject(err);
+                    }
                 });
                 state.pending = [];
             }
@@ -27,10 +39,12 @@ function qFactory(callLater) {
         };
 
         this.then = function(resolveCb, rejectCb) {
-            this.$$state.pending.push([null, resolveCb, rejectCb]);
+            var result = new Deferred();
+            this.$$state.pending.push([result, resolveCb, rejectCb]);
             if (this.$$state.status > 0) {
                 scheduleProcessQueue(callLater, this.$$state);
             }
+            return result.promise;
         };
 
         this.catch = function(cb) {
@@ -39,7 +53,7 @@ function qFactory(callLater) {
 
         this.finally = function(cb) {
             var fn = function() {
-              cb();
+                cb();
             };
             return this.then(fn, fn);
         };
@@ -51,9 +65,16 @@ function qFactory(callLater) {
             if (this.promise.$$state.value !== undefined)
                 return;
 
-            this.promise.$$state.value = val;
-            this.promise.$$state.status = FULFILLED;
-            scheduleProcessQueue(callLater, this.promise.$$state);
+            if (val && _.isFunction(val.then)) {
+              val.then(
+                _.bind(this.resolve, this),
+                _.bind(this.reject, this)
+              );
+            } else {
+                this.promise.$$state.value = val;
+                this.promise.$$state.status = FULFILLED;
+                scheduleProcessQueue(callLater, this.promise.$$state);
+            }
         };
         this.reject = function(val) {
             if (this.promise.$$state.value !== undefined)
