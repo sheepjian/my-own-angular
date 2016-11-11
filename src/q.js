@@ -4,6 +4,7 @@ var _ = require('lodash');
 
 var FULFILLED = 1;
 var REJECTED = 2;
+var NOTIFIED = 3;
 
 function qFactory(callLater) {
 
@@ -28,6 +29,13 @@ function qFactory(callLater) {
                     }
                 });
                 state.pending = [];
+            } else {
+                _.forEach(state.pending, function(handlers) {
+                    var notifyCb = handlers[NOTIFIED];
+                    if (_.isFunction(notifyCb)) {
+                        notifyCb(state.msg);
+                    }
+                });
             }
         });
     }
@@ -38,9 +46,9 @@ function qFactory(callLater) {
             status: 0
         };
 
-        this.then = function(resolveCb, rejectCb) {
+        this.then = function(resolveCb, rejectCb, notifyCb) {
             var result = new Deferred();
-            this.$$state.pending.push([result, resolveCb, rejectCb]);
+            this.$$state.pending.push([result, resolveCb, rejectCb, notifyCb]);
             if (this.$$state.status > 0) {
                 scheduleProcessQueue(callLater, this.$$state);
             }
@@ -52,10 +60,28 @@ function qFactory(callLater) {
         };
 
         this.finally = function(cb) {
-            var fn = function() {
-                cb();
-            };
-            return this.then(fn, fn);
+            var res = cb();
+            return this.then(function(val) {
+                if (res && _.isFunction(res.then)) {
+                    return res.then(function() {
+                        return val;
+                    });
+                } else {
+                    return val;
+                }
+            }, function(rejection) {
+                if (res && _.isFunction(res.then)) {
+                    return res.then(function() {
+                        var d = new Deferred();
+                        d.reject(rejection);
+                        return d.promise;
+                    });
+                } else {
+                    var d = new Deferred();
+                    d.reject(rejection);
+                    return d.promise;
+                }
+            });
         };
     }
 
@@ -66,10 +92,10 @@ function qFactory(callLater) {
                 return;
 
             if (val && _.isFunction(val.then)) {
-              val.then(
-                _.bind(this.resolve, this),
-                _.bind(this.reject, this)
-              );
+                val.then(
+                    _.bind(this.resolve, this),
+                    _.bind(this.reject, this)
+                );
             } else {
                 this.promise.$$state.value = val;
                 this.promise.$$state.status = FULFILLED;
@@ -82,6 +108,11 @@ function qFactory(callLater) {
 
             this.promise.$$state.value = val;
             this.promise.$$state.status = REJECTED;
+            scheduleProcessQueue(callLater, this.promise.$$state);
+        };
+
+        this.notify = function(val) {
+            this.promise.$$state.msg = val;
             scheduleProcessQueue(callLater, this.promise.$$state);
         };
     }
