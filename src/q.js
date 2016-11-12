@@ -29,13 +29,6 @@ function qFactory(callLater) {
                     }
                 });
                 state.pending = [];
-            } else {
-                _.forEach(state.pending, function(handlers) {
-                    var notifyCb = handlers[NOTIFIED];
-                    if (_.isFunction(notifyCb)) {
-                        notifyCb(state.msg);
-                    }
-                });
             }
         });
     }
@@ -59,8 +52,10 @@ function qFactory(callLater) {
             return this.then(null, cb);
         };
 
-        this.finally = function(cb) {
-            var res = cb();
+        this.finally = function(cb, notifyCb) {
+            var res;
+            if(_.isFunction(cb))
+              res = cb();
             return this.then(function(val) {
                 if (res && _.isFunction(res.then)) {
                     return res.then(function() {
@@ -81,7 +76,7 @@ function qFactory(callLater) {
                     d.reject(rejection);
                     return d.promise;
                 }
-            });
+            }, notifyCb);
         };
     }
 
@@ -94,7 +89,8 @@ function qFactory(callLater) {
             if (val && _.isFunction(val.then)) {
                 val.then(
                     _.bind(this.resolve, this),
-                    _.bind(this.reject, this)
+                    _.bind(this.reject, this),
+                    _.bind(this.notify, this)
                 );
             } else {
                 this.promise.$$state.value = val;
@@ -112,8 +108,24 @@ function qFactory(callLater) {
         };
 
         this.notify = function(val) {
-            this.promise.$$state.msg = val;
-            scheduleProcessQueue(callLater, this.promise.$$state);
+            var state = this.promise.$$state;
+            if (state.status === 0) {
+                callLater(function() {
+                    _.forEach(state.pending, function(handlers) {
+                        var notifyCb = handlers[NOTIFIED];
+                        if (_.isFunction(notifyCb)) {
+                            try {
+                                var newMsg = notifyCb(val);
+                                handlers[0].notify(newMsg);
+                            } catch (err) {
+                                // do nothing
+                            }
+                        } else {
+                            handlers[0].notify(val);
+                        }
+                    });
+                });
+            }
         };
     }
 
