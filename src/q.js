@@ -54,8 +54,8 @@ function qFactory(callLater) {
 
         this.finally = function(cb, notifyCb) {
             var res;
-            if(_.isFunction(cb))
-              res = cb();
+            if (_.isFunction(cb))
+                res = cb();
             return this.then(function(val) {
                 if (res && _.isFunction(res.then)) {
                     return res.then(function() {
@@ -133,8 +133,45 @@ function qFactory(callLater) {
         return new Deferred();
     };
 
+    var reject = function(val) {
+        var d = defer();
+        d.reject(val);
+        return d.promise;
+    };
+
+    var when = function(value, callback, errback, progressback) {
+        var d = defer();
+        d.resolve(value);
+        return d.promise.then(callback, errback, progressback);
+    };
+
+    var all = function(promises) {
+        var d = defer();
+        var counter = 0;
+        var res = _.isArray(promises) ? [] : {};
+        _.forEach(promises, function(cb, index) {
+            counter++;
+            when(cb).then(function(val) {
+                counter--;
+                res[index] = val;
+                if (!counter)
+                    d.resolve(res);
+            }, function(rejection) {
+                d.reject(rejection);
+            });
+        });
+        if (!counter)
+            d.resolve(res);
+
+        return d.promise;
+    };
+
     var q = {
-        defer: defer
+        defer: defer,
+        reject: reject,
+        when: when,
+        resolve: when,
+        all: all
     };
 
     return q;
