@@ -7,7 +7,6 @@ var REJECTED = 2;
 var NOTIFIED = 3;
 
 function qFactory(callLater) {
-
     function scheduleProcessQueue(rootEval, state) {
         rootEval(function() {
             if (state.status > 0) {
@@ -166,15 +165,23 @@ function qFactory(callLater) {
         return d.promise;
     };
 
-    var q = {
+    var $Q = function Q(resolver) {
+        if (!_.isFunction(resolver)) {
+            throw 'Expected function, got ' + resolver;
+        }
+        var d = defer();
+        resolver(_.bind(d.resolve, d), _.bind(d.reject, d));
+        return d.promise;
+
+    };
+
+    return _.extend($Q, {
         defer: defer,
         reject: reject,
         when: when,
         resolve: when,
         all: all
-    };
-
-    return q;
+    });
 }
 
 function $QProvider() {
@@ -185,4 +192,15 @@ function $QProvider() {
     }];
 }
 
-module.exports = $QProvider;
+function $$QProvider() {
+    this.$get = function() {
+        return qFactory(function(callback) {
+            setTimeout(callback, 0);
+        });
+    };
+}
+
+module.exports = {
+    $QProvider: $QProvider,
+    $$QProvider: $$QProvider
+};
